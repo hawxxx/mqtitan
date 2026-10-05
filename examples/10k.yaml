@@ -1,0 +1,30 @@
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: local-10k-telemetry
+broker:
+  url: mqtt://localhost:1883
+  version: "3.1.1"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+clients:
+  count: 10000
+  idTemplate: mqtitan-${sequence:06}
+stages:
+  - duration: 30s
+    targetClients: 1000
+  - duration: 2m
+    targetClients: 10000
+workloads:
+  - name: telemetry
+    type: publisher
+    clients: 10000
+    topic: devices/${clientId}/telemetry
+    qos: 1
+    ratePerClient: 1
+    payload:
+      type: static
+      value: '{"source":"mqtitan"}'
+thresholds:
+  connection_error_rate: "<1%"
+  publish_error_rate: "<0.1%"

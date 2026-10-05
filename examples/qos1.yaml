@@ -1,0 +1,29 @@
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: qos1-telemetry
+broker:
+  url: mqtt://localhost:1883
+  version: "3.1.1"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+clients:
+  count: 100
+  idTemplate: qos1-${sequence:08}
+stages:
+  - duration: 30s
+    targetClients: 100
+workloads:
+  - name: telemetry
+    type: publisher
+    clients: 100
+    topic: devices/${clientId}/telemetry
+    qos: 1
+    ratePerClient: 1
+    payload:
+      type: static
+      value: '{"source":"mqtitan"}'
+thresholds:
+  connection_error_rate: "<1%"
+  publish_error_rate: "<0.1%"
+

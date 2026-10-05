@@ -1,0 +1,31 @@
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: chat-room
+broker:
+  url: mqtt://localhost:1883
+  version: "3.1.1"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+clients:
+  count: 100
+  idTemplate: chat-${sequence:06}
+stages:
+  - duration: 30s
+    targetClients: 100
+workloads:
+  - name: speakers
+    type: publisher
+    clients: 10
+    topic: chat/room/1
+    qos: 1
+    ratePerClient: 1
+    payload:
+      type: static
+      value: '{"message":"hello"}'
+  - name: listeners
+    type: subscriber
+    clients: 90
+    topic: chat/room/1
+    qos: 1
+

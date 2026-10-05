@@ -1,0 +1,26 @@
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: gateway-mixed
+broker:
+  url: mqtt://localhost:1883
+  version: "3.1.1"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+clients:
+  count: 100
+  idTemplate: gateway-${sequence:06}
+stages:
+  - duration: 30s
+    targetClients: 100
+workloads:
+  - name: gateways
+    type: mixed
+    clients: 100
+    topic: gateway/${clientId}/events
+    qos: 1
+    ratePerClient: 1
+    payload:
+      type: static
+      value: '{"temperature":21}'
+

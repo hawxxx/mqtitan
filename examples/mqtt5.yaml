@@ -1,0 +1,26 @@
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: mqtt5-qos1
+broker:
+  url: mqtt://localhost:1883
+  version: "5"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+clients:
+  count: 100
+  idTemplate: v5-${sequence:06}
+stages:
+  - duration: 30s
+    targetClients: 100
+workloads:
+  - name: telemetry
+    type: publisher
+    clients: 100
+    topic: devices/${clientId}/telemetry
+    qos: 1
+    ratePerClient: 1
+    payload:
+      type: static
+      value: '{"protocol":5}'
+

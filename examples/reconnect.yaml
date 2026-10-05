@@ -1,0 +1,30 @@
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: bounded-reconnect
+broker:
+  url: mqtt://localhost:1883
+  version: "3.1.1"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+  reconnect:
+    enabled: true
+    maxAttempts: 3
+    initialBackoff: 1s
+    maxBackoff: 10s
+clients:
+  count: 100
+  idTemplate: reconnect-${sequence:06}
+stages:
+  - duration: 1m
+    targetClients: 100
+workloads:
+  - name: gateways
+    type: mixed
+    clients: 100
+    topic: recovery/${clientId}/events
+    qos: 1
+    ratePerClient: 1
+    payload:
+      type: static
+      value: '{"recovery":true}'

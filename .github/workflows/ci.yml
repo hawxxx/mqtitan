@@ -1,0 +1,37 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - run: npm ci --no-audit --no-fund && npm run build
+        working-directory: web
+      - run: go test -race ./...
+      - run: go vet ./...
+      - run: go build ./cmd/mqtitan
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
+      - run: npm ci --no-audit --no-fund
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - uses: azure/setup-helm@v4.3.0
+        with: {version: v3.17.3}
+      - run: helm lint deploy/helm/mqtitan
+      - run: helm template test deploy/helm/mqtitan --set worker.replicas=2 --set ingress.enabled=true --set serviceMonitor.enabled=true > /tmp/chart.yaml
+      - run: docker build -t mqtitan:ci .

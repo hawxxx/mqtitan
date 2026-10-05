@@ -1,0 +1,48 @@
+{{- if gt (int .Values.worker.replicas) 0 }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels: {app: "{{ .Release.Name }}", component: worker}
+  template:
+    metadata:
+      labels: {app: "{{ .Release.Name }}", component: worker}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["worker", "--controller", "$(CONTROLLER_URL)", "--id", "$(POD_NAME)", "--health-listen", "0.0.0.0:8081"]
+          ports: [{name: health, containerPort: 8081}]
+          readinessProbe: {httpGet: {path: /readyz, port: health}, initialDelaySeconds: 2, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /healthz, port: health}, initialDelaySeconds: 10, periodSeconds: 10}
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: CONTROLLER_URL
+              valueFrom: {configMapKeyRef: {name: "{{ .Release.Name }}-config", key: controllerURL}}
+            - name: MQTITAN_TOKEN
+              valueFrom: {secretKeyRef: {name: "{{ .Values.auth.existingSecret }}", key: "{{ .Values.auth.key }}"}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+{{- end }}

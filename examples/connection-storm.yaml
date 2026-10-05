@@ -1,0 +1,26 @@
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: connection-storm
+broker:
+  url: mqtt://localhost:1883
+  version: "3.1.1"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+clients:
+  count: 1000
+  idTemplate: connections-${sequence:06}
+stages:
+  - duration: 10s
+    targetClients: 100
+  - duration: 30s
+    targetClients: 1000
+  - duration: 10s
+    targetClients: 0
+workloads:
+  - name: connections
+    type: connection
+    clients: 1000
+thresholds:
+  connection_error_rate: "<1%"
+

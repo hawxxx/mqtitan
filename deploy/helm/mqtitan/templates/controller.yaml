@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: "{{ .Release.Name }}", component: controller}
+  template:
+    metadata:
+      labels: {app: "{{ .Release.Name }}", component: controller}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      containers:
+        - name: controller
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["serve", "--listen", "0.0.0.0:8080", "--data", "/data/mqtitan.db", "--web", "/app/web/dist"]
+          env:
+            - name: MQTITAN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "auth.existingSecret is required" .Values.auth.existingSecret }}
+                  key: {{ .Values.auth.key }}
+          ports: [{name: http, containerPort: 8080}]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
+          readinessProbe: {httpGet: {path: /readyz, port: http}, initialDelaySeconds: 2, periodSeconds: 5}
+          livenessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 10, periodSeconds: 10}
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          volumeMounts: [{name: data, mountPath: /data}, {name: tmp, mountPath: /tmp}]
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim: {claimName: "{{ .Release.Name }}"}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels: {app: "{{ .Release.Name }}", component: controller}
+spec:
+  selector: {app: "{{ .Release.Name }}", component: controller}
+  ports: [{name: http, port: 8080, targetPort: http}]
+{{- if .Values.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if .Values.persistence.storageClass }}
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}
+

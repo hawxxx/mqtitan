@@ -1,0 +1,24 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  podSelector:
+    matchLabels: {app: "{{ .Release.Name }}"}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - ports: [{protocol: TCP, port: 8080}]
+    - ports: [{protocol: TCP, port: 8081}]
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app: "{{ .Release.Name }}", component: controller}
+      ports: [{protocol: TCP, port: 8080}]
+    {{- with .Values.networkPolicy.brokerEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

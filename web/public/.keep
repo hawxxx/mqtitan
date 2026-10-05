@@ -1,0 +1,1 @@
+Build the frontend with npm ci && npm run build before compiling the production binary.
