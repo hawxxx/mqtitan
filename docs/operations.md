@@ -1,5 +1,7 @@
 # Deployment and operation
 
+For step-by-step setup and a first test, use [Docker and Compose](docker.md) or [Kubernetes with Helm](kubernetes.md). This guide covers additional operational settings and qualification.
+
 ## Local quickstart
 
 Build the CLI with Go 1.25 and the UI with Node 22:

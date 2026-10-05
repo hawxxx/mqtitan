@@ -40,7 +40,7 @@ Inspect a reusable scenario before running it:
 
 `quick --save scenario.yaml` saves a reusable configuration. Do not start two controllers on the same port or open the same database from independent processes.
 
-For containers, follow [operations](docs/operations.md) to configure required secrets, then run `docker compose up --build`. Distributed workers, Helm deployment, authentication, CI thresholds, reports, and host tuning are documented there.
+For containers, follow the [Docker and Compose walkthrough](docs/docker.md). For a cluster, use the [Kubernetes and Helm walkthrough](docs/kubernetes.md). Both explain setup, authentication, running tests, distributed workers, and data retention. [Operations](docs/operations.md) covers advanced deployment, CI thresholds, and host tuning.
 
 The test wizard supports [certificate uploads](docs/certificates.md): custom CA trust, client certificates/private keys for mTLS, reusable encrypted profiles, and SNI overrides for secure MQTT or WebSocket endpoints.
 

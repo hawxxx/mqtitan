@@ -11,6 +11,8 @@ MQTTitan is an engineering preview. Deployment manifests and large scenarios are
 | Repeat a finished test | [Rerunning tests](reruns.md) |
 | Configure TLS or upload certificates | [Certificates](certificates.md) |
 | Deploy controllers and workers | [Operations](operations.md) |
+| Start a container stack | [Docker and Compose](docker.md) |
+| Run distributed load in a cluster | [Kubernetes with Helm](kubernetes.md) |
 | Collect broker-side metrics | [EMQX integration](emqx.md) |
 | Automate through HTTP | [REST API](api.md) |
 | Diagnose failures | [Troubleshooting](troubleshooting.md) |
