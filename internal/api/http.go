@@ -259,6 +259,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 	m.workerRoutes(mux)
 	m.certificateRoutes(mux)
 	m.loadRoutes(mux)
+	m.rerunRoutes(mux)
 	m.brokerRoute(mux)
 	if opts.WebDir != "" || opts.WebFS != nil {
 		assets := opts.WebFS

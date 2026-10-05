@@ -5,6 +5,8 @@ MQTTitan is an open-source MQTT load-testing platform for EMQX and standards-com
 ## Quick start
 
 ```bash
+git clone https://github.com/hawxxx/mqtitan.git
+cd mqtitan
 make build
 ./bin/mqtitan quick --broker mqtt://localhost:1883 --clients 1000 --rate 1 --duration 30s
 ./bin/mqtitan validate examples/10k.yaml
@@ -20,6 +22,8 @@ For containers, follow [operations](docs/operations.md) to configure required se
 The test wizard supports [certificate uploads](docs/certificates.md): custom CA trust, client certificates/private keys for mTLS, reusable encrypted profiles, and SNI overrides for secure MQTT or WebSocket endpoints.
 
 Use [live load controls](docs/live-controls.md) to adjust client targets and message rates during a test. Set spare client capacity in the wizard, then use sliders and **Apply load** on the live test screen. Local and distributed execution share the same controls; changes are recorded in results.
+
+Open a finished test and click **Run again** to launch a fresh run from its original scenario while preserving the previous results. Credentials are reused server-side, and recorded workers are retained. See [rerunning tests](docs/reruns.md) for legacy runs and worker availability.
 
 See [architecture](docs/architecture/overview.md), [scenario specification](docs/scenario-spec.md), and [roadmap](docs/roadmap.md).
 

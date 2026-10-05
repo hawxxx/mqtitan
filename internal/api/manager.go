@@ -23,17 +23,19 @@ import (
 var ErrBusy = errors.New("a test is already running; stop it before starting another")
 
 type Test struct {
-	ID          string              `json:"id"`
-	Name        string              `json:"name"`
-	Status      string              `json:"status"`
-	StartedAt   time.Time           `json:"startedAt"`
-	EndedAt     *time.Time          `json:"endedAt,omitempty"`
-	Scenario    string              `json:"scenario"`
-	Snapshot    metrics.Snapshot    `json:"snapshot"`
-	Thresholds  []thresholds.Result `json:"thresholds"`
-	Error       string              `json:"error,omitempty"`
-	LoadControl *LoadControl        `json:"loadControl,omitempty"`
-	LoadChanges []LoadChange        `json:"loadChanges,omitempty"`
+	ID           string              `json:"id"`
+	Name         string              `json:"name"`
+	Status       string              `json:"status"`
+	StartedAt    time.Time           `json:"startedAt"`
+	EndedAt      *time.Time          `json:"endedAt,omitempty"`
+	Scenario     string              `json:"scenario"`
+	Snapshot     metrics.Snapshot    `json:"snapshot"`
+	Thresholds   []thresholds.Result `json:"thresholds"`
+	Error        string              `json:"error,omitempty"`
+	LoadControl  *LoadControl        `json:"loadControl,omitempty"`
+	LoadChanges  []LoadChange        `json:"loadChanges,omitempty"`
+	WorkerIDs    []string            `json:"workerIds"`
+	SourceTestID string              `json:"sourceTestId,omitempty"`
 }
 type Sample struct {
 	Timestamp   time.Time        `json:"timestamp"`
@@ -127,6 +129,9 @@ func (m *Manager) persist(t Test) error {
 
 func (m *Manager) Start(raw string) (Test, error) { return m.StartOnWorkers(raw, nil) }
 func (m *Manager) StartOnWorkers(raw string, workerIDs []string) (Test, error) {
+	return m.startTest(raw, workerIDs, "")
+}
+func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string) (Test, error) {
 	s, err := decodeScenario(raw)
 	if err != nil {
 		return Test{}, err
@@ -146,9 +151,11 @@ func (m *Manager) StartOnWorkers(raw string, workerIDs []string) (Test, error) {
 		}
 	}
 	ctx, cancel := context.WithCancel(m.ctx)
-	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s)}
+	ids := make([]string, len(workerIDs))
+	copy(ids, workerIDs)
+	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, SourceTestID: sourceTestID}
 	counters := metrics.New()
-	r := &execution{ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: workerIDs, snapshot: counters.Snapshot}
+	r := &execution{ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot}
 	if len(workerIDs) > 0 {
 		if err := m.assign(r, s, workerIDs); err != nil {
 			cancel()

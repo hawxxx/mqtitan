@@ -46,3 +46,11 @@ The Magic UI MCP registry was queried for suitable components. Its static Grid P
 Sliders now have filled tracks, larger handles, scale ticks, logarithmic publisher-rate control, presets, exact numeric inputs, unapplied-change status and Reset draft. The 29-test frontend suite passes, including scale conversion, accessible values, disabled controls, draft/reset behavior and unique decorative SVG IDs. The final production frontend and embedded Go binary build successfully.
 
 Browser checks covered all eight main pages at 1440px desktop and 390px mobile widths, with no document-level horizontal overflow. Dark/light screenshots are under `output/playwright/design-*.png`. A real MQTT 5/QoS 1 EMQX run confirmed presets remain drafts until Apply, pause/resume and clean shutdown. A final keyboard check increased the client target from 4 to 5 and applied 10 messages/publisher/sec; the broker reached 5 connected clients. Verification runs were stopped after checking.
+
+## Run again
+
+The frontend suite passes 33 tests; the full Go race suite, `go vet ./...`, production frontend build and embedded binary build pass. Rerun tests cover terminal-status validation, authentication, active-test conflicts, missing results, immutable source records/samples, reset metrics/live overrides, server-side credential reuse, controller restart, recorded distributed worker assignment and rejection of unavailable workers.
+
+A browser clicked Run again on stopped source `b90e059144357823f6e0c214` and navigated to fresh run `14a227095c821c9b5980f86f`. EMQX reached 4 clients at the original rate 1; the previous manual 5-client/rate-10 override was not inherited. The old result remained stopped with 561 publishes and its original change history. Stopping the new run made Run again available without a reload. The local browser artifact is `output/playwright/rerun-live.png`.
+
+The older source has no saved worker metadata, and its local-execution warning was visible before rerunning. New runs persist worker selection and source lineage. See [rerunning tests](reruns.md) for semantics and legacy behavior.

@@ -4,6 +4,7 @@ import { LatencyPanel } from "./LatencyPanel";
 import { CertificateSettings } from "./CertificateSettings";
 import { LiveLoadControls } from "./LiveLoadControls";
 import { GridPattern } from "./components/magicui/GridPattern";
+import { RunAgainButton } from "./RunAgainButton";
 import {
   createRootRoute,
   createRoute,
@@ -1063,6 +1064,7 @@ function useStream(id: string, running: boolean) {
   return state;
 }
 function TestDetail({ id }: { id: string }) {
+  const navigate = useNavigate();
   const test = useQuery({
     queryKey: ["test", id],
     queryFn: () => request<Test>(`/tests/${id}`),
@@ -1102,6 +1104,16 @@ function TestDetail({ id }: { id: string }) {
         detail={`Started ${new Date(t.startedAt).toLocaleString()}${t.endedAt ? ` · Ended ${new Date(t.endedAt).toLocaleString()}` : ""}`}
       >
         <Badge status={t.status} />
+        <RunAgainButton
+          key={id}
+          test={t}
+          onStarted={(run) => {
+            qc.setQueryData(["test", run.id], run);
+            qc.invalidateQueries({ queryKey: ["tests"] });
+            setTab("Overview");
+            navigate({ to: "/tests/$id", params: { id: run.id } });
+          }}
+        />
         {t.status === "running" && (
           <button
             className="danger"
@@ -1118,6 +1130,21 @@ function TestDetail({ id }: { id: string }) {
           <Download size={15} /> JSON
         </button>
       </Title>
+      {t.status !== "running" && t.workerIds == null && (
+        <p className="rerun-legacy-note">
+          This older run has no recorded worker selection. Run again uses the
+          local engine.
+        </p>
+      )}
+      {t.sourceTestId && (
+        <p className="rerun-source">
+          New run of{" "}
+          <Link to="/tests/$id" params={{ id: t.sourceTestId }}>
+            test {t.sourceTestId.slice(0, 12)}
+          </Link>
+          . Original results are unchanged.
+        </p>
+      )}
       {(stop.error || exportError || t.error) && (
         <ErrorNotice error={stop.error || exportError || t.error} />
       )}

@@ -42,6 +42,8 @@ export interface Test {
     passed: boolean;
   }[];
   error?: string;
+  workerIds?: string[] | null;
+  sourceTestId?: string;
   loadControl?: {
     capacityClients: number;
     maxRatePerClient: number;
