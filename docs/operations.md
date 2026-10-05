@@ -5,15 +5,11 @@
 Build the CLI with Go 1.25 and the UI with Node 22:
 
 ```sh
-go build -o mqtitan ./cmd/mqtitan
-cd web
-npm ci --no-audit --no-fund
-npm run build
-cd ..
-./mqtitan serve --listen 127.0.0.1:8080 --data ./mqtitan.db --web web/dist
+make build
+./bin/mqtitan serve --listen 127.0.0.1:8080 --data ./mqtitan.db
 ```
 
-Open http://127.0.0.1:8080. Local mode binds loopback. Set MQTITAN_TOKEN to enable bearer authentication. Non-loopback serving requires this token; --allow-remote-local-mode explicitly enables an unauthenticated demo and should only be used on an isolated trusted network.
+Open http://127.0.0.1:8080. Local mode binds loopback. Set MQTITAN_TOKEN to enable bearer authentication. Non-loopback serving requires configured authentication; --allow-remote-local-mode explicitly enables an unauthenticated demo and should only be used on an isolated trusted network. The build embeds the frontend; `--web web/dist` is an optional filesystem override.
 
 For the container demo, export MQTITAN_TOKEN and EMQX_DASHBOARD_PASSWORD as strong random values, then run:
 

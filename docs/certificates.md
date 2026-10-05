@@ -40,3 +40,9 @@ If the AWS load balancer terminates TLS, client TLS credentials authenticate to 
 ## API
 
 `POST /api/v1/certificates` accepts `name`, optional `caPem`, and optional paired `certPem`/`keyPem`. `GET /api/v1/certificates` lists metadata only. Both use the existing control-plane authentication. Material is not exposed by a GET endpoint. Create a new profile when rotating certificates; profile update/delete is not currently implemented.
+
+## Storage lifecycle
+
+Reusable profiles are encrypted controller-database records, not ephemeral browser-only certificates. They survive restarts and pod/container replacement when the database volume survives. Terminating a pod does not erase its persistent volume. Workers hold resolved credentials in process memory; those copies disappear when the process ends.
+
+Back up the database and adjacent `.key` together and protect both. `docker compose down` normally retains volumes. This preview has no ephemeral-profile toggle or profile-deletion API.

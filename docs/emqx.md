@@ -1,5 +1,19 @@
 # Optional EMQX observations
 
+## Enable broker telemetry
+
+Set these variables in the controller's runtime environment before starting `mqtitan serve`:
+
+```sh
+export MQTITAN_EMQX_URL=https://emqx-management.example.com:18084
+# Supply MQTITAN_EMQX_API_KEY and MQTITAN_EMQX_API_SECRET through your secret manager.
+./bin/mqtitan serve
+```
+
+The URL is the management server base URL, not the MQTT endpoint or a path ending in `/api/v5`. Use the actual management port configured on your deployment. The dashboard's Brokers section and `GET /api/v1/brokers/emqx` expose observations. This integration is optional and does not configure broker authentication for MQTT clients.
+
+## Supported observations and limitations
+
 The adapter reads GET /api/v5/nodes and GET /api/v5/metrics?aggregate=false with HTTP Basic authentication: username is an EMQX API key, password its secret. Dashboard administrator credentials are not API keys. Keep credentials in runtime environment/secret references and prefer HTTPS.
 
 Client.Fetch returns a timestamped Snapshot and an error. An endpoint failure leaves available observations intact; callers must display the error instead of treating missing counters as zero. Client.Poll continues through API failures until its context is canceled. Run polling independently of the MQTT execution path; its receiver should return promptly.

@@ -1,85 +1,62 @@
-# Architecture
+# Architecture and scalability
 
-## System shape
+This describes the implemented engineering preview, not a million-client qualification. See the [roadmap](../roadmap.md) and [verification evidence](../verification.md).
 
 ```text
-CLI / React UI
-      |
-versioned controller API + SSE
-      |
-scenario compiler -- capacity planner -- scheduler -- result store
-      |
-bounded protobuf command/telemetry streams
-      |
-worker supervisor -- rate shards -- MQTT event loops -- local aggregation
-      |                                      |
-MQTT 3.1.1/5 brokers                 EMQX telemetry API
+CLI / React dashboard
+        │ REST commands + aggregate SSE telemetry
+        ▼
+Go controller ── SQLite records and samples
+        │ HTTP JSON assignments and heartbeats
+        ├── local engine ── MQTT broker endpoint
+        └── distributed workers ── MQTT broker endpoint
 ```
 
-Controller owns durable test state, partitions immutable compiled plans, coordinates monotonic start deadlines, and persists compact rollups. Workers own MQTT sockets and load accuracy. UI consumes one-second aggregates. UI loss never affects a run.
+## Components and execution
 
-## Boundaries
+One Go binary provides CLI, controller, and worker commands. React 19/TypeScript uses Vite, TanStack Router/Query/Table/Virtual, and uPlot. The controller validates scenarios, partitions client sequences, collects rollups, evaluates thresholds, and persists results. Only one run may be active at a time. Optional EMQX telemetry is independent of MQTT execution.
 
-- `scenario`: YAML input, defaults, semantic validation, immutable execution plan.
-- `engine`: client lifecycle, pacing, connection and publish execution, cancellation.
-- `metrics`: lock-minimized counters, bounded histograms, one-second snapshots.
-- `distributed`: worker registration, leases, partitioning, heartbeats, protobuf streams.
-- `storage`: repository interfaces; SQLite default, PostgreSQL optional.
-- `api`: REST control plane and resumable SSE telemetry.
-- `emqx`: optional API adapter; never required by engine.
+Each client has a cancellable lifecycle goroutine, with additional MQTT-library connection work. This is not a custom socket event-loop implementation. Stage changes create or cancel clients. The default connection-attempt pacer is 500/sec per engine, not a cluster-wide connection-rate limit.
 
-## Concurrency architecture
+Publishers use per-client pacing and await publish completion; acknowledgement delays can reduce achieved rates. Payload templates compile once per client and reuse private buffers where safe. Global rates, unlimited mode, Poisson arrivals, dedicated burst scheduling, and automatic fault injection are not implemented.
 
-Workers partition clients into shards. Each shard owns client state and rate schedule. Initial implementation uses one goroutine per connected client because MQTT client libraries already allocate per-connection readers/writers. Production engine replaces this behind same interface with poller-based sockets after benchmarks show crossover point.
+[Live controls](../live-controls.md) notify engines of the latest override. Targets stay within configured client capacity; overrides change stage load targets, not test duration. Browser disconnects do not cancel a separately running controller. Local `quick`/`run` commands do stop their owned server when they finish.
 
-No hot path sends per-message telemetry. Atomic counters collect totals. Per-shard HDR histograms rotate each second and merge off hot path. Error keys use bounded reason-code categories plus fixed-size reservoir samples. Every queue has capacity and overload policy.
+## Metrics and backpressure
 
-Load path priority:
+Atomic counters and sharded, mutex-protected cumulative HDR histograms record metrics. Snapshots merge distributions outside the publish hot path; histograms do not rotate independently every second. Errors use bounded categories rather than per-message persistence. Individual client IDs and topic names are not uncontrolled Prometheus labels.
 
-1. MQTT socket work
-2. lifecycle accuracy
-3. local metric aggregation
-4. controller telemetry
-5. UI fidelity
+Workers send cumulative aggregates and histogram distributions over HTTP JSON, normally once per second. Protobuf is not the current transport. SSE subscribers have one-snapshot buffers: new telemetry replaces stale pending snapshots. At most 128 subscribers attach to a run. Consumers can skip intermediate visual updates; they reconcile through REST on reconnect. There is no event-ID replay. Metrics retrieval is bounded to 3,600 samples.
 
-Telemetry congestion drops intermediate snapshots and retains newest cumulative state. It never blocks publishers.
+Publish-operation latency is not delivery latency. Correlated cross-host delivery uses sender wall-clock timestamps; synchronize clocks manually. Automatic clock-offset qualification is not implemented.
 
-## Distributed correctness
+## Distributed failure behavior
 
-- Controller assigns stable client index ranges; templates remain deterministic across worker counts.
-- Workers acknowledge a plan before controller issues a future monotonic start deadline.
-- Heartbeat lease expiry marks assigned capacity lost; controller does not silently reassign stateful MQTT sessions.
-- Wall-clock offset is measured and reported. Durations use monotonic clocks.
-- Commands carry test ID, plan digest, assignment generation, and idempotency key.
-- Reconnected workers resume only matching active generation.
+Workers register unique IDs, receive client partitions and a future wall-clock start time, and report heartbeats and control revisions. Registration provides discovery, not Kubernetes autoscaling. Workers need broker connectivity and assigned trust material.
 
-## Persistence model
+The heartbeat lease expires after 15 seconds. Worker loss stops the run; automatic replacement and partition reassignment are not implemented. Controller restart marks previously active stored tests interrupted rather than restoring MQTT sockets. Lost-capacity accounting and final reconciliation require further qualification. [Rerunning](../reruns.md) creates a fresh test ID without replacing prior results.
 
-Core entities:
+## Persistence and security
 
-- `scenarios`: versioned YAML plus normalized plan digest.
-- `tests`: lifecycle, scenario version, verdict, start/end time.
-- `worker_assignments`: index range, generation, health, lost capacity.
-- `metric_buckets`: test, timestamp, resolution, dimensions, counters, histogram encoding.
-- `error_aggregates`: category, reason code, count, bounded samples.
-- `threshold_results`: expression, observed value, pass/fail.
-- `secrets`: encrypted envelope only; references appear in scenarios.
+SQLite is the implemented database; PostgreSQL is not supported. The `records` table stores encrypted scenario, test, and certificate values using AES-GCM. The `samples` table stores aggregated JSON without record encryption. No raw message history is persisted. Back up the database and adjacent `.key` together; independent controllers must not share one database.
 
-One-second buckets stay during active/recent runs. Compaction writes 5-second, 30-second, then 1-minute buckets transactionally before deleting source buckets. Never store individual messages.
+Compaction retains the latest cumulative sample per bucket: 5 seconds after one hour, 30 seconds after one day, and one minute after seven days. Samples older than 90 days are removed when compaction runs. This is not averaging or peak-preserving aggregation, nor a standalone retention daemon. Metadata is not automatically deleted with samples.
 
-## Scalability risks and controls
+Authentication supports local mode, bearer tokens, basic authentication, OIDC, and trusted reverse-proxy authentication. Native LDAP and role-based authorization are not implemented. Remote HTTP endpoints require TLS at the ingress/reverse proxy. Persistent certificate profiles survive pod/container replacement when their database volume survives; see [certificates](../certificates.md).
 
-- Goroutine and library overhead: benchmark memory/client; move transport to sharded pollers when sockets dominate.
-- Global limiter contention: distribute permits into independent rate shards; reconcile drift once per second.
-- Histogram contention: shard and rotate; merge snapshots outside hot path.
-- TLS CPU: cache parsed trust roots, support session resumption, stagger handshakes, expose handshake saturation.
-- File descriptors and ports: preflight limits, source-IP capacity, TIME_WAIT pressure, and socket budget.
-- NIC saturation: estimate bidirectional wire bytes including MQTT/TLS overhead; report generator saturation.
-- Controller bottleneck: workers send fixed-cardinality rollups, delta-compressed protobuf, bounded latest-wins queue.
-- Browser pressure: SSE rollups at 1 Hz, uPlot typed arrays, TanStack Virtual, server-side dimension filtering.
-- Storage growth: tiered downsampling and retention limits.
-- Cardinality: controlled group/worker/QoS labels only. Client ID and raw topic never become labels.
+Prometheus aggregates are exposed at `/metrics`. OpenTelemetry samples internal operations rather than tracing each message. A pprof endpoint is not currently implemented.
 
-## Security model
+## Scalability limits to qualify
 
-Local mode binds loopback without auth. Server mode requires configured auth. OIDC and reverse-proxy identity map to roles. Secrets use envelope encryption and never enter logs, metrics, URLs, or API responses. TLS verification defaults on. pprof defaults off and binds loopback when enabled.
+| Limit | Current response and remaining work |
+| --- | --- |
+| File descriptors and ephemeral ports | Read-only doctor checks; multiple source hosts may be necessary |
+| Client goroutines, timers, and MQTT buffers | Benchmark memory/CPU at increasing populations; no million-client guarantee |
+| Network and acknowledgement throughput | Compare achieved rates with generator resources and broker telemetry |
+| Histogram/snapshot cost | Sharded recording and off-path merges; benchmark telemetry overhead |
+| Worker JSON and controller aggregation | Local rollups; qualify controller capacity as worker count grows |
+| SQLite writes and history growth | Compaction and bounded reads; single-controller deployment |
+| Slow browsers | Latest-wins SSE and aggregate charts; reconcile after reconnect |
+| Controller/worker failure | Cancellation and interrupted results, not transparent failover |
+
+Capacity plans are uncalibrated estimates. Large example scenarios express targets, not measured capacity. Establish generator baselines, inspect container as well as host limits, and perform soak, failure, and security qualification before production capacity commitments.
