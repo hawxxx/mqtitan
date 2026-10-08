@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/HdrHistogram/hdrhistogram-go v1.1.2
 	github.com/coreos/go-oidc/v3 v3.12.0
-	github.com/eclipse/paho.golang v0.22.0
+	github.com/eclipse/paho.golang v0.23.0
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/mochi-mqtt/server/v2 v2.7.9
 	go.opentelemetry.io/otel v1.47.0
