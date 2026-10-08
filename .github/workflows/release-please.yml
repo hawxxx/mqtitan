@@ -1,0 +1,33 @@
+name: Release PR
+# Conventional commits on main -> a release PR (version bump + changelog).
+# Merging that PR creates the vX.Y.Z tag/release and dispatches the image release.
+# Tags created with GITHUB_TOKEN do not trigger other workflows, hence the explicit dispatch.
+on:
+  push:
+    branches: [main]
+permissions: {}
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write       # tag, release, changelog commit
+      pull-requests: write  # release PR
+      actions: write        # dispatch the image release workflow
+    steps:
+      - uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with: {egress-policy: audit}
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Publish image for the new tag
+        if: steps.rp.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"

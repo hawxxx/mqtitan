@@ -15,7 +15,7 @@ MQTITAN_IMAGE=ghcr.io/hawxxx/mqtitan:0.2.0 docker compose up -d --no-build
 helm install mqtitan deploy/helm/mqtitan --set image.digest=sha256:<digest>
 ```
 
-Cut a release with `git tag v0.2.0 && git push origin v0.2.0`. The release workflow scans the image first and publishes nothing if fixable HIGH/CRITICAL vulnerabilities are found. After the first push, set the GHCR package visibility to public if you want anonymous pulls.
+Releases are automated: conventional commits (`feat:`, `fix:`) on `main` open a "release PR" with the version bump and changelog. Merging it tags `vX.Y.Z` and publishes the image. Manual fallback: `git tag v0.2.0 && git push origin v0.2.0`. The release workflow scans the image first and publishes nothing if fixable HIGH/CRITICAL vulnerabilities are found. After the first push, set the GHCR package visibility to public if you want anonymous pulls.
 
 ## Start the stack
 
