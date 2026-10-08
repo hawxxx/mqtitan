@@ -1,7 +1,8 @@
 services:
   controller:
     build: .
-    image: mqtitan:local
+    # Published image: MQTITAN_IMAGE=ghcr.io/hawxxx/mqtitan:1.2.3 docker compose pull
+    image: ${MQTITAN_IMAGE:-mqtitan:local}
     environment:
       MQTITAN_TOKEN: ${MQTITAN_TOKEN:?Set MQTITAN_TOKEN to a random bearer token}
     ports:
@@ -29,7 +30,7 @@ services:
       - broker-data:/opt/emqx/data
     restart: unless-stopped
   worker:
-    image: mqtitan:local
+    image: ${MQTITAN_IMAGE:-mqtitan:local}
     profiles: [workers]
     command: ["worker", "--controller", "http://controller:8080", "--id", "compose-worker-1"]
     environment:

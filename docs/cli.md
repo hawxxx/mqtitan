@@ -43,6 +43,8 @@ Without `--controller`, `quick` and `run` own a local controller, defaulting to 
 ./bin/mqtitan run examples/10k.yaml --controller http://127.0.0.1:8080
 ```
 
+Set `MQTITAN_CONTROLLER=http://127.0.0.1:8080` once (and `MQTITAN_TOKEN` if auth is on) instead of repeating `--controller`; the flag still overrides it.
+
 Put the scenario path or test ID before flags on `run`, `stop`, `results`, and `export`. A browser disconnect does not cancel a controller-managed test. Interrupting the running CLI requests cancellation.
 
 ## Results and distributed workers

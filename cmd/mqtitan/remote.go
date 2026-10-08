@@ -62,7 +62,7 @@ func request(ctx context.Context, controller, method, path string, body any, out
 }
 func remoteCommand(command string, args []string) error {
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
-	controller := f.String("controller", "http://127.0.0.1:8080", "controller URL")
+	controller := f.String("controller", controllerDefault("http://127.0.0.1:8080"), "controller URL (env MQTITAN_CONTROLLER)")
 	format := f.String("format", "json", "export format json/csv")
 	id := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {

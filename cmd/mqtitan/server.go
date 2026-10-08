@@ -30,7 +30,7 @@ func runFlags(f *flag.FlagSet) *runOptions {
 	o := &runOptions{}
 	f.StringVar(&o.Listen, "listen", "127.0.0.1:8080", "dashboard listen address")
 	f.StringVar(&o.Data, "data", "mqtitan.db", "encrypted SQLite database")
-	f.StringVar(&o.Controller, "controller", "", "remote controller URL")
+	f.StringVar(&o.Controller, "controller", controllerDefault(""), "remote controller URL (env MQTITAN_CONTROLLER)")
 	f.StringVar(&o.Workers, "workers", "", "comma-separated distributed worker IDs")
 	f.StringVar(&o.Web, "web", "", "override embedded UI asset directory")
 	return o
@@ -230,7 +230,7 @@ func verdict(t api.Test) error {
 }
 func workerCommand(args []string) error {
 	f := flag.NewFlagSet("worker", flag.ContinueOnError)
-	controller := f.String("controller", "http://127.0.0.1:8080", "controller URL")
+	controller := f.String("controller", controllerDefault("http://127.0.0.1:8080"), "controller URL (env MQTITAN_CONTROLLER)")
 	id := f.String("id", "", "unique worker ID")
 	health := f.String("health-listen", "127.0.0.1:8081", "health-only listen address")
 	if err := f.Parse(args); err != nil {

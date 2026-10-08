@@ -1,6 +1,7 @@
 image:
-  repository: mqtitan
-  tag: "0.1.0"
+  repository: ghcr.io/hawxxx/mqtitan
+  tag: ""          # defaults to Chart appVersion
+  digest: ""       # e.g. sha256:...; overrides tag for immutable deploys
   pullPolicy: IfNotPresent
 auth:
   existingSecret: mqtitan-auth

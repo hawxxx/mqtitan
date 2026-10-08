@@ -2,6 +2,21 @@
 
 Run commands from the repository root. You need Docker with Compose v2; Go and Node.js are not needed on the host because the image builds both components. The supplied stack includes a controller, a development EMQX broker, and an optional worker.
 
+## Published images
+
+Releases publish multi-arch (`linux/amd64`, `linux/arm64`) images to `ghcr.io/hawxxx/mqtitan` with SBOM, max-mode provenance, and a signed GitHub artifact attestation. Tags: `X.Y.Z`, `X.Y`, `X` (not for 0.x), `main`, `sha-<commit>`, and `latest` (stable `vX.Y.Z` tags only). Pin deployments by digest.
+
+```sh
+docker pull ghcr.io/hawxxx/mqtitan:0.2.0
+gh attestation verify oci://ghcr.io/hawxxx/mqtitan:0.2.0 --repo hawxxx/mqtitan
+# Compose with the published image instead of a local build:
+MQTITAN_IMAGE=ghcr.io/hawxxx/mqtitan:0.2.0 docker compose up -d --no-build
+# Helm (digest wins over tag):
+helm install mqtitan deploy/helm/mqtitan --set image.digest=sha256:<digest>
+```
+
+Cut a release with `git tag v0.2.0 && git push origin v0.2.0`. The release workflow scans the image first and publishes nothing if fixable HIGH/CRITICAL vulnerabilities are found. After the first push, set the GHCR package visibility to public if you want anonymous pulls.
+
 ## Start the stack
 
 Provide two different strong secrets in your shell or secret-management workflow. For example, in a Bash shell with OpenSSL installed:

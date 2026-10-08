@@ -16,6 +16,17 @@ import (
 	"time"
 )
 
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "dev"
+
+// controllerDefault lets MQTITAN_CONTROLLER replace the per-command --controller flag.
+func controllerDefault(fallback string) string {
+	if v := os.Getenv("MQTITAN_CONTROLLER"); v != "" {
+		return v
+	}
+	return fallback
+}
+
 type exitError struct {
 	code    int
 	message string
@@ -89,8 +100,8 @@ func run(args []string) error {
 		}
 		fmt.Println("INFO  memory              " + platform.MemoryTotal())
 		return nil
-	case "version":
-		fmt.Println("mqtitan 0.2.0-dev")
+	case "version", "--version", "-v":
+		fmt.Println("mqtitan " + version)
 		return nil
 	case "help", "--help", "-h":
 		usage()
@@ -101,7 +112,7 @@ func run(args []string) error {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: mqtitan <quick|validate|plan|run|serve|worker|status|stop|results|export|workers|doctor|version>\nquick --broker mqtt://localhost:1883 --clients 10000 --rate 1\nserve --listen 127.0.0.1:8080 --data mqtitan.db\nrun scenario.yaml [--controller http://localhost:8080] [--workers worker-a,worker-b]")
+	fmt.Fprintln(os.Stderr, "usage: mqtitan <quick|validate|plan|run|serve|worker|status|stop|results|export|workers|doctor|version>\nquick --broker mqtt://localhost:1883 --clients 10000 --rate 1\nserve --listen 127.0.0.1:8080 --data mqtitan.db\nrun scenario.yaml [--controller http://localhost:8080] [--workers worker-a,worker-b]\n\nEnvironment: MQTITAN_CONTROLLER (default --controller), MQTITAN_TOKEN (bearer token), MQTITAN_MQTT_PASSWORD")
 }
 
 func quick(args []string) error {
