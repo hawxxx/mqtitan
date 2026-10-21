@@ -39,7 +39,12 @@ func request(ctx context.Context, controller, method, path string, body any, out
 	client := http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(r)
 	if err != nil {
-		return errors.New("controller request failed")
+		// Report the transport cause (refused, DNS, TLS, timeout) without repeating the URL.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return fmt.Errorf("controller request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
