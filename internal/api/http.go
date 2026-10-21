@@ -27,9 +27,9 @@ type Options struct {
 	// token must not grant control and the control token must not pose as
 	// a worker.
 	WorkerToken string
-	WebDir    string
-	WebFS     fs.FS
-	Authorize func(*http.Request) bool
+	WebDir      string
+	WebFS       fs.FS
+	Authorize   func(*http.Request) bool
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -343,6 +343,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 		mux.ServeHTTP(w, r)
 	})
 }
+
 // The dashboard loads its own scripts and Google Fonts; React sets inline
 // style attributes, so style-src needs 'unsafe-inline'.
 const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"

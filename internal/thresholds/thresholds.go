@@ -116,14 +116,11 @@ func Evaluate(input map[string]string, s metrics.Snapshot) ([]Result, error) {
 		case "end_to_end_latency_p99":
 			value, valid = float64(s.EndToEndP99), s.CorrelationSamples > 0
 		case "publish_latency_p50":
-			value = float64(s.P50)
-			valid = s.Published > 0
+			value, valid = float64(s.P50), hasLatencySamples(s)
 		case "publish_latency_p95":
-			value = float64(s.P95)
-			valid = s.Published > 0
+			value, valid = float64(s.P95), hasLatencySamples(s)
 		case "publish_latency_p99":
-			value = float64(s.P99)
-			valid = s.Published > 0
+			value, valid = float64(s.P99), hasLatencySamples(s)
 		}
 		passed := false
 		if valid {
@@ -158,4 +155,15 @@ func Passed(results []Result) bool {
 		}
 	}
 	return true
+}
+
+// hasLatencySamples requires recorded latency, not just published messages:
+// a merged result whose worker histograms were missing or invalid has
+// Published > 0 but zero percentiles, which would pass any "<" threshold.
+func hasLatencySamples(s metrics.Snapshot) bool {
+	var n uint64
+	for _, b := range s.Histogram {
+		n += b.Count
+	}
+	return s.PublishLatencyCount > 0 && n > 0
 }

@@ -18,7 +18,7 @@ One Go binary provides CLI, controller, and worker commands. React 19/TypeScript
 
 Each client has a cancellable lifecycle goroutine, with additional MQTT-library connection work. This is not a custom socket event-loop implementation. Stage changes create or cancel clients. The default connection-attempt pacer is 500/sec per engine, not a cluster-wide connection-rate limit.
 
-Publishers use per-client pacing and await publish completion; acknowledgement delays can reduce achieved rates. Payload templates compile once per client and reuse private buffers where safe. Global rates, unlimited mode, Poisson arrivals, dedicated burst scheduling, and automatic fault injection are not implemented.
+Publishers follow a fixed per-client schedule and await publish completion (one in-flight publish per client). When a publish outlasts its slot, the slots that came due meanwhile are skipped and counted as `publishSlotsMissed`: a non-zero value means the generator or the acknowledgement path could not sustain the requested rate, so treat the achieved rate, not the requested one, as the load. Publish latency is recorded with HdrHistogram's coordinated-omission correction, so a stall also contributes the delay its skipped slots would have seen; min/avg/max and `publishLatencyCount` count only real publishes. A publish or subscribe that exceeds `operationTimeout` is recorded in the `timeout` error category and the client closes that connection itself; the closed session is not reported as a broker disconnect. Payload templates compile once per client and reuse private buffers where safe. Global rates, unlimited mode, Poisson arrivals, dedicated burst scheduling, and automatic fault injection are not implemented.
 
 [Live controls](../live-controls.md) notify engines of the latest override. Targets stay within configured client capacity; overrides change stage load targets, not test duration. Browser disconnects do not cancel a separately running controller. Local `quick`/`run` commands do stop their owned server when they finish.
 
@@ -28,13 +28,13 @@ Atomic counters and sharded, mutex-protected cumulative HDR histograms record me
 
 Workers send cumulative aggregates and histogram distributions over HTTP JSON, normally once per second. Protobuf is not the current transport. SSE subscribers have one-snapshot buffers: new telemetry replaces stale pending snapshots. At most 128 subscribers attach to a run. Consumers can skip intermediate visual updates; they reconcile through REST on reconnect. There is no event-ID replay. Metrics retrieval is bounded to 3,600 samples.
 
-Publish-operation latency is not delivery latency. Correlated cross-host delivery uses sender wall-clock timestamps; synchronize clocks manually. Automatic clock-offset qualification is not implemented.
+Publish-operation latency is not delivery latency: for QoS 0 it is the socket write, for QoS 1/2 the time until PUBACK/PUBCOMP. Correlated delivery latency uses sender wall-clock timestamps; synchronize clocks manually. Messages whose timestamp lies in the future or more than ten minutes back are counted as `correlationRejected` rather than recorded, so a non-zero value indicates clock skew between hosts. Workers report their clock offset to the controller, but automatic offset correction is not implemented.
 
 ## Distributed failure behavior
 
 Workers register unique IDs, receive client partitions and a future wall-clock start time, and report heartbeats and control revisions. Registration provides discovery, not Kubernetes autoscaling. Workers need broker connectivity and assigned trust material.
 
-The heartbeat lease expires after 15 seconds. Worker loss stops the run; automatic replacement and partition reassignment are not implemented. Controller restart marks previously active stored tests interrupted rather than restoring MQTT sockets. Lost-capacity accounting and final reconciliation require further qualification. [Rerunning](../reruns.md) creates a fresh test ID without replacing prior results.
+The heartbeat lease expires after 15 seconds. Worker loss stops the run: the controller asks surviving workers to stop, waits up to ten seconds for their final reports, records the lost worker IDs in `lostWorkers`, and keeps the lost workers' last cumulative counters while zeroing their live gauges. Automatic replacement and partition reassignment are not implemented. Reports carry a per-assignment sequence so a delayed report cannot overwrite a newer one, and each registration receives a session that heartbeats must present. Distributed `peakConnected` is the highest aggregate the controller observed in its once-per-second samples, not the sum of per-worker peaks. Controller restart marks previously active stored tests interrupted rather than restoring MQTT sockets. [Rerunning](../reruns.md) creates a fresh test ID without replacing prior results.
 
 ## Persistence and security
 

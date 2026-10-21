@@ -445,3 +445,57 @@ func TestStableSessionRestoresReconnectBudget(t *testing.T) {
 	cancel()
 	<-done
 }
+
+// A broker that accepts the connection but never acknowledges QoS 1.
+func silentBroker(t *testing.T, v string) string {
+	t.Helper()
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				buf := make([]byte, 4096)
+				_, _ = c.Read(buf)
+				ack := []byte{0x20, 2, 0, 0}
+				if v == "5" {
+					ack = []byte{0x20, 3, 0, 0, 0}
+				}
+				_, _ = c.Write(ack)
+				_, _ = io.Copy(io.Discard, c)
+			}()
+		}
+	}()
+	return "mqtt://" + l.Addr().String()
+}
+
+func TestPublishTimeoutIsSaturationNotBrokerDisconnect(t *testing.T) {
+	for _, v := range []string{"3.1.1", "5"} {
+		t.Run(v, func(t *testing.T) {
+			s := baseScenario(silentBroker(t, v), v)
+			s.Broker.OperationTimeout = scenario.Duration{Duration: 100 * time.Millisecond}
+			s.Clients.Count = 1
+			s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 400 * time.Millisecond}, TargetClients: 1}}
+			s.Workloads = []scenario.Workload{{Type: "publisher", Clients: 1, Topic: "slow", QoS: 1, RatePerClient: 100, Payload: scenario.Payload{Value: "x"}}}
+			m := metrics.New()
+			if err := (&Engine{Scenario: s, Metrics: m}).Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			snap := m.Snapshot()
+			if snap.Errors["timeout"] != 1 || snap.Errors["publish"] != 0 || snap.Errors["disconnect"] != 0 {
+				t.Fatalf("timeout misclassified: %v", snap.Errors)
+			}
+			// 100ms of waiting at 100 msg/s skips about ten scheduled slots.
+			if snap.PublishSlotsMissed < 5 {
+				t.Fatalf("missed slots = %d, want >= 5", snap.PublishSlotsMissed)
+			}
+		})
+	}
+}

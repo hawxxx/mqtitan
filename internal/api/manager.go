@@ -114,6 +114,7 @@ func ID() string {
 	}
 	return hex.EncodeToString(b)
 }
+
 // decodeScenario validates a scenario received through the API. TLS file
 // paths are refused there: they would make the controller read, and present
 // to a caller-chosen broker, files from its own filesystem. Use certificate
