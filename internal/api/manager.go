@@ -196,7 +196,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 		now := time.Now().UTC()
 		snap := r.snapshot()
 		elapsed := now.Sub(lastTime).Seconds()
-		sample := Sample{now, snap, float64(snap.Published-last.Published) / elapsed, float64(snap.BytesSent-last.BytesSent) / elapsed}
+		sample := Sample{now, snap, perSecond(snap.Published, last.Published, elapsed), perSecond(snap.BytesSent, last.BytesSent, elapsed)}
 		last = snap
 		lastTime = now
 		b, _ := json.Marshal(sample)
@@ -261,6 +261,16 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 	}
 }
 
+// perSecond returns a counter's rate between two samples. Aggregated distributed
+// counters can move backwards when a worker's report is lost; that interval
+// reports zero instead of a wrapped uint64 delta, and an empty interval never
+// yields NaN or Inf, which JSON cannot encode.
+func perSecond(current, previous uint64, seconds float64) float64 {
+	if seconds <= 0 || current < previous {
+		return 0
+	}
+	return float64(current-previous) / seconds
+}
 func (m *Manager) notify(r *execution, e Event) {
 	for ch := range r.subscribers {
 		select {
@@ -358,10 +368,8 @@ func (m *Manager) Samples(id string) ([]Sample, error) {
 	}
 	for i := 1; i < len(out); i++ {
 		elapsed := out[i].Timestamp.Sub(out[i-1].Timestamp).Seconds()
-		if elapsed > 0 {
-			out[i].MessageRate = float64(out[i].Snapshot.Published-out[i-1].Snapshot.Published) / elapsed
-			out[i].ByteRate = float64(out[i].Snapshot.BytesSent-out[i-1].Snapshot.BytesSent) / elapsed
-		}
+		out[i].MessageRate = perSecond(out[i].Snapshot.Published, out[i-1].Snapshot.Published, elapsed)
+		out[i].ByteRate = perSecond(out[i].Snapshot.BytesSent, out[i-1].Snapshot.BytesSent, elapsed)
 	}
 	return out, nil
 }

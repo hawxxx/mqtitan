@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -95,5 +96,18 @@ func TestInterruptDuringPollStopsRemoteTest(t *testing.T) {
 	}
 	if !stopped.Load() {
 		t.Fatal("interrupted run left the remote test running")
+	}
+}
+
+func TestRequestReportsTransportCause(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+	err = request(context.Background(), "http://"+address, "GET", "/api/v1/tests", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "controller request failed: ") || !strings.Contains(err.Error(), "refused") {
+		t.Fatalf("error = %v, want transport cause", err)
 	}
 }

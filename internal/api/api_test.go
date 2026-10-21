@@ -187,3 +187,16 @@ func TestLocalEngineSetupErrorIsReported(t *testing.T) {
 		t.Fatalf("list %+v %v", list, err)
 	}
 }
+
+func TestPerSecondRejectsRegressionAndEmptyIntervals(t *testing.T) {
+	if got := perSecond(150, 50, 2); got != 50 {
+		t.Fatalf("rate = %v, want 50", got)
+	}
+	// A lost worker report shrinks the aggregate; it must not wrap to ~1.8e19.
+	if got := perSecond(10, 50, 1); got != 0 {
+		t.Fatalf("regressed counter rate = %v, want 0", got)
+	}
+	if got := perSecond(10, 5, 0); got != 0 {
+		t.Fatalf("zero interval rate = %v, want 0", got)
+	}
+}
