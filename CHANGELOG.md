@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/hawxxx/mqtitan/compare/v0.2.0...v0.2.1) (2026-10-21)
+
+
+### Bug Fixes
+
+* update Go 1.26.10 image and golang.org/x/net 0.60.0 ([#20](https://github.com/hawxxx/mqtitan/issues/20)) ([da34f8b](https://github.com/hawxxx/mqtitan/commit/da34f8bce9287b6564590642465a7fd436ee7f56))
+
 ## [0.2.0](https://github.com/hawxxx/mqtitan/compare/v0.1.0...v0.2.0) (2026-10-21)
 
 
