@@ -234,9 +234,9 @@ export async function download(id: string, format: string) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
-// Run-quality warnings derived from generator-side counters. Thresholds are
-// deliberately small: any missed slot or skewed sample changes how results
-// should be read.
+// Run-quality warnings derived from generator-side counters: at least 1% of
+// publish slots skipped, at least 0.1% of correlated samples rejected for
+// clock skew, or any lost worker.
 export function runWarnings(t: Test): string[] {
   const s = t.snapshot;
   const out: string[] = [];

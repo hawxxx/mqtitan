@@ -483,7 +483,7 @@ func TestPublishTimeoutIsSaturationNotBrokerDisconnect(t *testing.T) {
 			s.Broker.OperationTimeout = scenario.Duration{Duration: 100 * time.Millisecond}
 			s.Clients.Count = 1
 			s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 400 * time.Millisecond}, TargetClients: 1}}
-			s.Workloads = []scenario.Workload{{Type: "publisher", Clients: 1, Topic: "slow", QoS: 1, RatePerClient: 100, Payload: scenario.Payload{Value: "x"}}}
+			s.Workloads = []scenario.Workload{{Type: "publisher", Clients: 1, Topic: "slow", QoS: 1, RatePerClient: 20000, Payload: scenario.Payload{Value: "x"}}}
 			m := metrics.New()
 			if err := (&Engine{Scenario: s, Metrics: m}).Run(context.Background()); err != nil {
 				t.Fatal(err)
@@ -492,8 +492,8 @@ func TestPublishTimeoutIsSaturationNotBrokerDisconnect(t *testing.T) {
 			if snap.Errors["timeout"] != 1 || snap.Errors["publish"] != 0 || snap.Errors["disconnect"] != 0 {
 				t.Fatalf("timeout misclassified: %v", snap.Errors)
 			}
-			// 100ms of waiting at 100 msg/s skips about ten scheduled slots.
-			if snap.PublishSlotsMissed < 5 {
+			// 100ms of waiting at 20,000 msg/s skips about 2,000 scheduled slots.
+			if snap.PublishSlotsMissed < 1000 {
 				t.Fatalf("missed slots = %d, want >= 5", snap.PublishSlotsMissed)
 			}
 		})

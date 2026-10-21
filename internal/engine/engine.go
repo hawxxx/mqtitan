@@ -349,9 +349,11 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 			e.Metrics.PublishErrors.Add(1)
 			e.Metrics.RecordError(failureCategory("publish", timedOut))
 			if timedOut {
-				// The client closed its own connection after the timeout; the
-				// session end is not an unexpected broker disconnect.
+				// The client closed its own connection after the timeout. End
+				// the session now rather than publishing on the closed client;
+				// its end is not an unexpected broker disconnect.
 				failed = true
+				return
 			}
 			continue
 		}

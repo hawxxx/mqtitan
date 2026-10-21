@@ -102,7 +102,7 @@ stateDiagram-v2
   Running --> Done: report.done
   Running --> Lost: no heartbeat for 15s
   Done --> Ready: test released
-  Lost --> Ready: same session re-registers after release
+  Lost --> Ready: heartbeats resume, or any process registers after release
   Lost --> Pruned: idle and unseen for 150s
   Ready --> Pruned: unseen for 150s
   Pruned --> [*]
