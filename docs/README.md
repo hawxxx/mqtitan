@@ -16,7 +16,7 @@ MQTTitan is an engineering preview. Deployment manifests and large scenarios are
 | Collect broker-side metrics | [EMQX integration](emqx.md) |
 | Automate through HTTP | [REST API](api.md) |
 | Diagnose failures | [Troubleshooting](troubleshooting.md) |
-| Understand implementation and limits | [Architecture](architecture/overview.md), [roadmap](roadmap.md) |
+| Understand implementation and limits | [Architecture](architecture/overview.md), [diagrams](architecture/diagrams.md), [roadmap](roadmap.md) |
 | Develop and verify changes | [Contributing](../CONTRIBUTING.md), [verification evidence](verification.md) |
 
 The historical design in `superpowers/plans/` records intent. Use the architecture guide and roadmap for the distinction between implemented behavior and future work.

@@ -1,6 +1,6 @@
 # Architecture and scalability
 
-This describes the implemented engineering preview, not a million-client qualification. See the [roadmap](../roadmap.md) and [verification evidence](../verification.md).
+This describes the implemented engineering preview, not a million-client qualification. [Diagrams](diagrams.md) show the component, lifecycle, worker, live-control, measurement and authentication flows. See the [roadmap](../roadmap.md) and [verification evidence](../verification.md).
 
 ```text
 CLI / React dashboard
