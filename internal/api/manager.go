@@ -35,6 +35,7 @@ type Test struct {
 	LoadControl  *LoadControl        `json:"loadControl,omitempty"`
 	LoadChanges  []LoadChange        `json:"loadChanges,omitempty"`
 	WorkerIDs    []string            `json:"workerIds"`
+	LostWorkers  []string            `json:"lostWorkers,omitempty"`
 	SourceTestID string              `json:"sourceTestId,omitempty"`
 }
 type Sample struct {
@@ -62,6 +63,9 @@ type execution struct {
 	subscribers map[chan Event]struct{}
 	workerIDs   []string
 	snapshot    func() metrics.Snapshot
+	// Guarded by the worker registry lock.
+	peakConnected int64
+	lostWorkers   []string
 }
 type Manager struct {
 	store   *storage.Store
@@ -228,6 +232,11 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			results, thresholdErr := thresholds.Evaluate(s.Thresholds, r.snapshot())
 			m.mu.Lock()
 			r.test.EndedAt = &now
+			if len(r.workerIDs) > 0 {
+				m.workers.mu.Lock()
+				r.test.LostWorkers = append([]string(nil), r.lostWorkers...)
+				m.workers.mu.Unlock()
+			}
 			r.test.Thresholds = results
 			r.test.Status = "completed"
 			if ctx.Err() != nil {

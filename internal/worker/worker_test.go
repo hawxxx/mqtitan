@@ -64,3 +64,39 @@ func TestWorkerReregistersAfterControllerRestart(t *testing.T) {
 		t.Fatalf("worker never recovered registration: %d registrations", registrations.Load())
 	}
 }
+
+func TestWorkerSendsSessionAndKeepsRegistrationOnRejectedReport(t *testing.T) {
+	var registrations, beats atomic.Int32
+	var badSession atomic.Bool
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/workers/register" {
+			registrations.Add(1)
+			fmt.Fprint(w, `{"data":{"status":"registered","session":"s3cret"}}`)
+			return
+		}
+		var h struct {
+			Session string `json:"session"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&h)
+		if h.Session != "s3cret" {
+			badSession.Store(true)
+		}
+		if beats.Add(1) == 1 {
+			w.WriteHeader(422)
+			fmt.Fprint(w, `{"error":{"code":"REPORT_REJECTED"}}`)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"serverTime": time.Now().UTC()}})
+	}))
+	defer s.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2200*time.Millisecond)
+	defer cancel()
+	_ = Run(ctx, Options{Controller: s.URL, ID: "session-worker"})
+	if badSession.Load() {
+		t.Fatal("heartbeat omitted the issued session")
+	}
+	if registrations.Load() != 1 || beats.Load() < 2 {
+		t.Fatalf("rejected report forced re-registration: registrations=%d beats=%d", registrations.Load(), beats.Load())
+	}
+}

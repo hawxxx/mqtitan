@@ -71,7 +71,7 @@ func TestLiveLoadAPIValidatesAndRecordsChanges(t *testing.T) {
 func TestDistributedLiveTargetsUseGlobalPartitionOffsets(t *testing.T) {
 	m, _ := setup(t)
 	for _, id := range []string{"a", "b"} {
-		if err := m.workers.register(Worker{ID: id, SupportsLiveControl: true}); err != nil {
+		if _, err := m.workers.register(Worker{ID: id, SupportsLiveControl: true}); err != nil {
 			t.Fatal(err)
 		}
 	}

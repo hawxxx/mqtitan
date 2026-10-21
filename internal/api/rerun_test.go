@@ -120,7 +120,7 @@ func TestRerunPreservesDistributedWorkersAndNeverFallsBackWhenUnavailable(t *tes
 	if _, err := m.Rerun(previous.ID); err == nil {
 		t.Fatal("unavailable worker silently fell back to local")
 	}
-	if err := m.workers.register(Worker{ID: "worker-a", SupportsLiveControl: true}); err != nil {
+	if _, err := m.workers.register(Worker{ID: "worker-a", SupportsLiveControl: true}); err != nil {
 		t.Fatal(err)
 	}
 	run, err := m.Rerun(previous.ID)
