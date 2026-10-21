@@ -63,10 +63,22 @@ type Counters struct {
 	BytesSent          atomic.Uint64
 	Reconnects         atomic.Uint64
 	Disconnects        atomic.Uint64
-	nextShard          atomic.Uint64
-	shards             [shardCount]latencyShard
-	errors             [5]atomic.Uint64
+	// PublishSlotsMissed counts scheduled publish slots skipped because the
+	// previous publish of that client had not completed: the generator, or
+	// the acknowledgement path, could not sustain the requested rate.
+	PublishSlotsMissed atomic.Uint64
+	// CorrelationRejected counts correlated messages whose timestamp was in
+	// the future or more than ten minutes old, typically clock skew between
+	// publisher and subscriber hosts.
+	CorrelationRejected atomic.Uint64
+	nextShard           atomic.Uint64
+	shards              [shardCount]latencyShard
+	errors              [len(errorCategories)]atomic.Uint64
 }
+
+// errorCategories are the bounded error classes; "timeout" is an operation
+// that exceeded operationTimeout, which the client then closed itself.
+var errorCategories = [...]string{"connect", "publish", "subscribe", "disconnect", "other", "timeout"}
 
 func New() *Counters { return &Counters{} }
 func (c *Counters) ClientConnected() {
@@ -80,19 +92,21 @@ func (c *Counters) ClientConnected() {
 }
 func (c *Counters) RecordError(category string) {
 	i := 4
-	switch category {
-	case "connect":
-		i = 0
-	case "publish":
-		i = 1
-	case "subscribe":
-		i = 2
-	case "disconnect":
-		i = 3
+	for j, name := range errorCategories {
+		if name == category {
+			i = j
+		}
 	}
 	c.errors[i].Add(1)
 }
 func (c *Counters) record(shard int, kind byte, d time.Duration) {
+	c.recordCorrected(shard, kind, d, 0)
+}
+
+// recordCorrected records d and, when expected > 0, the samples that slots
+// queued behind a slow operation would have observed (HdrHistogram's
+// coordinated-omission correction). The min/avg/max summary keeps only d.
+func (c *Counters) recordCorrected(shard int, kind byte, d, expected time.Duration) {
 	s := &c.shards[uint(shard)%shardCount]
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -108,12 +122,41 @@ func (c *Counters) record(shard int, kind byte, d time.Duration) {
 	if *h == nil {
 		*h = histogram()
 	}
-	_ = (*h).RecordValue(min(maxLatency, max(1, d.Microseconds())))
+	v := min(maxLatency, max(1, d.Microseconds()))
+	_ = (*h).RecordValue(v)
+	if interval := expected.Microseconds(); interval > 0 && v >= 2*interval {
+		backfill(*h, v, interval)
+	}
+}
+
+// backfill adds the samples that slots queued behind a v-long operation
+// would have observed: v-interval, v-2*interval, ... down to interval, as
+// HdrHistogram's RecordCorrectedValue does. That loop runs once per missing
+// sample, which a long stall at a microsecond period turns into millions of
+// iterations under the shard lock, so the ramp is recorded in at most 256
+// evenly spaced steps with the same total count.
+func backfill(h *hdr.Histogram, v, interval int64) {
+	n := v/interval - 1
+	steps := min(n, 256)
+	for k := range steps {
+		// Step k covers missing samples [k*n/steps, (k+1)*n/steps).
+		from, to := k*n/steps, (k+1)*n/steps
+		// Missing sample j is v-(j+1)*interval; record the step at its mean.
+		value := v - (from+to+1)*interval/2
+		_ = h.RecordValues(max(1, min(maxLatency, value)), to-from)
+	}
 }
 func (c *Counters) RecordPublishLatency(d time.Duration) {
 	c.RecordPublishLatencyFor(int(c.nextShard.Add(1)), d)
 }
 func (c *Counters) RecordPublishLatencyFor(shard int, d time.Duration) { c.record(shard, 0, d) }
+
+// RecordPublishLatencyCorrected records a publish that was scheduled every
+// interval; a publish slower than the interval also accounts for the slots
+// that waited behind it, so stalls are not hidden from the percentiles.
+func (c *Counters) RecordPublishLatencyCorrected(shard int, d, interval time.Duration) {
+	c.recordCorrected(shard, 0, d, interval)
+}
 func (c *Counters) RecordEndToEndLatency(d time.Duration) {
 	c.RecordEndToEndLatencyFor(int(c.nextShard.Add(1)), d)
 }
@@ -143,6 +186,8 @@ type Snapshot struct {
 	CorrelationSamples  uint64            `json:"correlationSamples"`
 	Reconnects          uint64            `json:"reconnects"`
 	Disconnects         uint64            `json:"disconnects"`
+	PublishSlotsMissed  uint64            `json:"publishSlotsMissed"`
+	CorrelationRejected uint64            `json:"correlationRejected"`
 	Errors              map[string]uint64 `json:"errors,omitempty"`
 	ConnectP50          time.Duration     `json:"connectP50"`
 	ConnectP95          time.Duration     `json:"connectP95"`
@@ -172,7 +217,9 @@ func (c *Counters) Snapshot() Snapshot {
 	s := Snapshot{ConnectAttempts: c.ConnectAttempts.Load(), Connected: c.Connected.Load(), TargetClients: c.TargetClients.Load(), Connecting: c.Connecting.Load(), PeakConnected: c.PeakConnected.Load(), ConnectErrors: c.ConnectErrors.Load(), PublishAttempts: c.PublishAttempts.Load(), Published: c.Published.Load(), PublishErrors: c.PublishErrors.Load(), BytesSent: c.BytesSent.Load(), Received: c.Received.Load(), BytesReceived: c.BytesReceived.Load(), Subscriptions: c.Subscriptions.Load(), SubscribeErrors: c.SubscribeErrors.Load(), CorrelationSamples: c.CorrelationSamples.Load(), Reconnects: c.Reconnects.Load(), Disconnects: c.Disconnects.Load(), Errors: map[string]uint64{}}
 	s.ConnectCancelled = c.ConnectCancelled.Load()
 	s.PublishCancelled = c.PublishCancelled.Load()
-	for i, name := range []string{"connect", "publish", "subscribe", "disconnect", "other"} {
+	s.PublishSlotsMissed = c.PublishSlotsMissed.Load()
+	s.CorrelationRejected = c.CorrelationRejected.Load()
+	for i, name := range errorCategories {
 		if n := c.errors[i].Load(); n > 0 {
 			s.Errors[name] = n
 		}
@@ -239,7 +286,8 @@ func latencyBuckets(h *hdr.Histogram) []Bucket {
 			continue
 		}
 		i := 0
-		for i < len(bounds)-1 && time.Duration(bar.From)*time.Microsecond > bounds[i] {
+		// Bucket by the bar's upper edge: a 5.001ms sample is not <= 5ms.
+		for i < len(bounds)-1 && time.Duration(bar.To)*time.Microsecond > bounds[i] {
 			i++
 		}
 		bins[i].Count += uint64(bar.Count)
@@ -298,13 +346,15 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 		out.CorrelationSamples += s.CorrelationSamples
 		out.Reconnects += s.Reconnects
 		out.Disconnects += s.Disconnects
+		out.PublishSlotsMissed += s.PublishSlotsMissed
+		out.CorrelationRejected += s.CorrelationRejected
 		out.PublishLatencyCount += s.PublishLatencyCount
 		out.PublishLatencySum = saturateDuration(out.PublishLatencySum, s.PublishLatencySum)
 		if s.Min > 0 && (out.Min == 0 || s.Min < out.Min) {
 			out.Min = s.Min
 		}
 		out.Max = max(out.Max, s.Max)
-		for _, name := range []string{"connect", "publish", "subscribe", "disconnect", "other"} {
+		for _, name := range errorCategories {
 			if n := s.Errors[name]; n > 0 {
 				out.Errors[name] += n
 			}

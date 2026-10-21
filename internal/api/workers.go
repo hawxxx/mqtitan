@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/subtle"
 	"errors"
+	"fmt"
 	"github.com/mqtitan/mqtitan/internal/engine"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"net/http"
@@ -20,6 +22,10 @@ type Worker struct {
 	LastSeen            time.Time `json:"lastSeen"`
 	ClockOffsetMS       float64   `json:"clockOffsetMs"`
 	SupportsLiveControl bool      `json:"supportsLiveControl"`
+	// Session is issued by the controller at registration and must accompany
+	// every heartbeat. It is never listed, so another API caller cannot pose
+	// as a registered worker and receive its assignment (with credentials).
+	Session string `json:"session,omitempty"`
 }
 type Assignment struct {
 	ID              string       `json:"id"`
@@ -33,8 +39,9 @@ type Assignment struct {
 }
 type workerState struct {
 	Worker
-	assignment *Assignment
-	report     Report
+	assignment  *Assignment
+	report      Report
+	heartbeated bool
 }
 type Report struct {
 	AssignmentID    string               `json:"assignmentId"`
@@ -43,12 +50,16 @@ type Report struct {
 	Done            bool                 `json:"done"`
 	Error           string               `json:"error,omitempty"`
 	ControlRevision uint64               `json:"controlRevision"`
+	// Sequence increases with every report for an assignment. A report that
+	// arrives after a newer one (a timed-out request processed late) is ignored.
+	Sequence uint64 `json:"sequence,omitempty"`
 }
 type Heartbeat struct {
 	ID          string    `json:"id"`
 	MemoryBytes uint64    `json:"memoryBytes"`
 	ClientTime  time.Time `json:"clientTime"`
 	Report      *Report   `json:"report,omitempty"`
+	Session     string    `json:"session,omitempty"`
 }
 type HeartbeatResponse struct {
 	Assignment *Assignment `json:"assignment,omitempty"`
@@ -59,27 +70,68 @@ type workerRegistry struct {
 	workers map[string]*workerState
 }
 
+// workerLease is how long a worker stays live without a heartbeat.
+const workerLease = 15 * time.Second
+
 var workerID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+var (
+	// errMustRegister tells a worker its registration is gone (controller
+	// restart) or now belongs to another process; it must register again.
+	errMustRegister = errors.New("worker must register")
+	// errReportRejected rejects one report without revoking the registration.
+	errReportRejected = errors.New("worker report rejected")
+)
 
 func newWorkerRegistry() *workerRegistry {
 	return &workerRegistry{workers: make(map[string]*workerState)}
 }
-func (r *workerRegistry) register(w Worker) error {
+
+// register returns the session the worker must present on heartbeats.
+func (r *workerRegistry) register(w Worker) (string, error) {
 	if !workerID.MatchString(w.ID) {
-		return errors.New("worker id must be 1-64 letters, numbers, underscores or hyphens")
+		return "", errors.New("worker id must be 1-64 letters, numbers, underscores or hyphens")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.workers[w.ID]; !ok && len(r.workers) >= 256 {
-		return errors.New("worker registry full (256 workers)")
+	now := time.Now().UTC()
+	r.prune(now)
+	existing := r.workers[w.ID]
+	if existing == nil && len(r.workers) >= 256 {
+		return "", errors.New("worker registry full (256 workers)")
 	}
-	if existing := r.workers[w.ID]; existing != nil && existing.assignment != nil && !existing.report.Done {
-		return errors.New("worker already has an active assignment")
+	owner := existing != nil && w.Session != "" && subtle.ConstantTimeCompare([]byte(w.Session), []byte(existing.Session)) == 1
+	if existing != nil && existing.assignment != nil {
+		// The owning process may re-register (it lost a heartbeat response);
+		// keep its assignment and report so a finished partition stays finished.
+		if owner {
+			existing.LastSeen = now
+			return existing.Session, nil
+		}
+		// A restarted or duplicate process must not take over, or reset the
+		// results of, a partition assigned to a running test.
+		return "", errors.New("worker ID is assigned to a running test; wait for the test to finish or use another ID")
 	}
+	// An entry that never heartbeated belongs to a registration whose
+	// response was lost; the retrying worker may replace it immediately.
+	if existing != nil && !owner && existing.heartbeated && now.Sub(existing.LastSeen) <= workerLease {
+		return "", errors.New("worker ID is in use by a live worker; use another ID")
+	}
+	w.Session = ID() + ID()
 	w.Status = "ready"
-	w.LastSeen = time.Now().UTC()
+	w.LastSeen = now
 	r.workers[w.ID] = &workerState{Worker: w}
-	return nil
+	return w.Session, nil
+}
+
+// prune forgets idle workers whose lease expired long ago, so replaced pods
+// do not exhaust the registry. Workers with an assignment are kept.
+func (r *workerRegistry) prune(now time.Time) {
+	for id, s := range r.workers {
+		if s.assignment == nil && now.Sub(s.LastSeen) > 10*workerLease {
+			delete(r.workers, id)
+		}
+	}
 }
 func (r *workerRegistry) list() []Worker {
 	r.mu.Lock()
@@ -87,7 +139,8 @@ func (r *workerRegistry) list() []Worker {
 	out := make([]Worker, 0, len(r.workers))
 	for _, s := range r.workers {
 		w := s.Worker
-		if time.Since(w.LastSeen) > 15*time.Second {
+		w.Session = ""
+		if time.Since(w.LastSeen) > workerLease {
 			w.Status = "lost"
 		} else if s.assignment != nil && !s.report.Done {
 			w.Status = "running"
@@ -101,11 +154,12 @@ func (r *workerRegistry) heartbeat(h Heartbeat) (HeartbeatResponse, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	s := r.workers[h.ID]
-	if s == nil {
-		return HeartbeatResponse{}, errors.New("worker must register")
+	if s == nil || subtle.ConstantTimeCompare([]byte(h.Session), []byte(s.Session)) != 1 {
+		return HeartbeatResponse{}, errMustRegister
 	}
 	now := time.Now().UTC()
 	s.LastSeen = now
+	s.heartbeated = true
 	s.MemoryBytes = h.MemoryBytes
 	s.ClockOffsetMS = float64(now.Sub(h.ClientTime).Microseconds()) / 1000
 	if h.Report != nil && s.assignment != nil && h.Report.AssignmentID == s.assignment.ID {
@@ -113,17 +167,21 @@ func (r *workerRegistry) heartbeat(h Heartbeat) (HeartbeatResponse, error) {
 		if s.assignment.Load != nil {
 			latest = s.assignment.Load.Revision
 		}
-		if h.Report.ControlRevision > latest {
-			return HeartbeatResponse{}, errors.New("worker acknowledged an unknown live load revision")
+		stale := h.Report.Sequence > 0 && s.report.AssignmentID == h.Report.AssignmentID && h.Report.Sequence <= s.report.Sequence
+		switch {
+		case stale:
+			// Delivered after a newer report; applying it would move counters,
+			// Done and the control acknowledgement backwards.
+		case h.Report.ControlRevision > latest:
+			return HeartbeatResponse{}, fmt.Errorf("%w: unknown live load revision", errReportRejected)
+		case metrics.ValidateDistribution(h.Report.Distribution) != nil:
+			return HeartbeatResponse{}, fmt.Errorf("%w: invalid latency histogram", errReportRejected)
+		case h.Report.Snapshot.Published < s.report.Snapshot.Published || h.Report.Snapshot.ConnectAttempts < s.report.Snapshot.ConnectAttempts:
+			return HeartbeatResponse{}, fmt.Errorf("%w: cumulative counters moved backwards", errReportRejected)
+		default:
+			s.report = *h.Report
+			s.Connected = h.Report.Snapshot.Connected
 		}
-		if err := metrics.ValidateDistribution(h.Report.Distribution); err != nil {
-			return HeartbeatResponse{}, errors.New("invalid latency histogram report")
-		}
-		if h.Report.Snapshot.Published < s.report.Snapshot.Published || h.Report.Snapshot.ConnectAttempts < s.report.Snapshot.ConnectAttempts {
-			return HeartbeatResponse{}, errors.New("worker cumulative counters moved backwards")
-		}
-		s.report = *h.Report
-		s.Connected = h.Report.Snapshot.Connected
 	}
 	var a *Assignment
 	if s.assignment != nil {
@@ -139,11 +197,12 @@ func (m *Manager) workerRoutes(mux *http.ServeMux) {
 		if !input(w, r, &worker) {
 			return
 		}
-		if err := m.workers.register(worker); err != nil {
+		session, err := m.workers.register(worker)
+		if err != nil {
 			writeError(w, 409, "REGISTRATION_FAILED", err.Error())
 			return
 		}
-		writeJSON(w, 201, map[string]string{"status": "registered"})
+		writeJSON(w, 201, map[string]string{"status": "registered", "session": session})
 	})
 	mux.HandleFunc("POST /api/v1/workers/heartbeat", func(w http.ResponseWriter, r *http.Request) {
 		var body Heartbeat
@@ -151,6 +210,10 @@ func (m *Manager) workerRoutes(mux *http.ServeMux) {
 			return
 		}
 		v, err := m.workers.heartbeat(body)
+		if errors.Is(err, errReportRejected) {
+			writeError(w, 422, "REPORT_REJECTED", err.Error())
+			return
+		}
 		if err != nil {
 			writeError(w, 409, "WORKER_UNKNOWN", err.Error())
 			return

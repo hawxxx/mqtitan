@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -54,15 +55,22 @@ func Run(ctx context.Context, opts Options) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	base := strings.TrimRight(opts.Controller, "/")
 	post := func(path string, body, out any) error {
-		b, err := json.Marshal(body)
-		if err != nil {
+		// Reports carry three dense HDR histograms (~130 KB of JSON, mostly
+		// zeros); gzip reduces them to a few kilobytes per heartbeat.
+		var b bytes.Buffer
+		z := gzip.NewWriter(&b)
+		if err := json.NewEncoder(z).Encode(body); err != nil {
 			return err
 		}
-		r, err := http.NewRequestWithContext(ctx, "POST", base+path, bytes.NewReader(b))
+		if err := z.Close(); err != nil {
+			return err
+		}
+		r, err := http.NewRequestWithContext(ctx, "POST", base+path, &b)
 		if err != nil {
 			return err
 		}
 		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Content-Encoding", "gzip")
 		if opts.Token != "" {
 			r.Header.Set("Authorization", "Bearer "+opts.Token)
 		}
@@ -86,6 +94,8 @@ func Run(ctx context.Context, opts Options) error {
 		return nil
 	}
 	registered := false
+	session := ""
+	var sequence uint64
 	lastContact := time.Now()
 	var current *running
 	lastAssignment := ""
@@ -104,9 +114,13 @@ func Run(ctx context.Context, opts Options) error {
 			return ctx.Err()
 		}
 		if !registered {
-			err = post("/api/v1/workers/register", api.Worker{ID: opts.ID, CPUCount: runtime.NumCPU(), SupportsLiveControl: true}, nil)
+			var reg struct {
+				Session string `json:"session"`
+			}
+			err = post("/api/v1/workers/register", api.Worker{ID: opts.ID, CPUCount: runtime.NumCPU(), SupportsLiveControl: true, Session: session}, &reg)
 			if err == nil {
 				registered = true
+				session = reg.Session
 			} else {
 				slog.Warn("worker registration failed", "worker", opts.ID)
 			}
@@ -114,7 +128,7 @@ func Run(ctx context.Context, opts Options) error {
 		if registered {
 			var memory runtime.MemStats
 			runtime.ReadMemStats(&memory)
-			h := api.Heartbeat{ID: opts.ID, MemoryBytes: memory.Sys, ClientTime: time.Now().UTC()}
+			h := api.Heartbeat{ID: opts.ID, MemoryBytes: memory.Sys, ClientTime: time.Now().UTC(), Session: session}
 			if current != nil {
 				if !current.finished {
 					select {
@@ -126,7 +140,8 @@ func Run(ctx context.Context, opts Options) error {
 					default:
 					}
 				}
-				h.Report = &api.Report{AssignmentID: current.assignment.ID, Snapshot: current.counters.Snapshot(), Distribution: current.counters.ExportDistribution(), Done: current.finished, Error: current.failure}
+				sequence++
+				h.Report = &api.Report{AssignmentID: current.assignment.ID, Snapshot: current.counters.Snapshot(), Distribution: current.counters.ExportDistribution(), Done: current.finished, Error: current.failure, Sequence: sequence}
 				load, _ := current.control.Current()
 				h.Report.ControlRevision = load.Revision
 			}
@@ -190,6 +205,10 @@ func Run(ctx context.Context, opts Options) error {
 				ready(false)
 				slog.Warn("worker heartbeat failed", "worker", opts.ID)
 				var status httpStatusError
+				// 409: the registration is gone or owned by another process. Stop
+				// the load; re-registering with the same session resumes a
+				// partition this process still owns. A rejected report (422)
+				// keeps both the registration and the load.
 				if errors.As(err, &status) && status.status == 409 {
 					registered = false
 					if current != nil {

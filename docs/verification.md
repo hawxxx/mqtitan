@@ -54,3 +54,18 @@ The frontend suite passes 33 tests; the full Go race suite, `go vet ./...`, prod
 A browser clicked Run again on stopped source `b90e059144357823f6e0c214` and navigated to fresh run `14a227095c821c9b5980f86f`. EMQX reached 4 clients at the original rate 1; the previous manual 5-client/rate-10 override was not inherited. The old result remained stopped with 561 publishes and its original change history. Stopping the new run made Run again available without a reload. The local browser artifact is `output/playwright/rerun-live.png`.
 
 The older source has no saved worker metadata, and its local-execution warning was visible before rerunning. New runs persist worker selection and source lineage. See [rerunning tests](reruns.md) for semantics and legacy behavior.
+
+## Quality hardening (2026-10-21)
+
+Environment: one WSL2 host (32 cores), Go 1.26, local Mosquitto 2 container, mochi-mqtt in tests. These are functional checks, not capacity evidence.
+
+| Check | Result |
+| --- | --- |
+| `go test -race ./...`, `go vet ./...` | Pass, including new registry, sequencing, drain, peak, saturation, timeout-classification, corrected-latency, bucket-edge, threshold-validity, worker-token, CSP, TLS-path and gzip-bound tests |
+| Web tests (Vitest), `tsc -b`, Vite build | 41 tests pass |
+| Worker report size, 100k recorded samples | 140,563 B JSON, 1,165 B gzip |
+| Snapshot merge (`BenchmarkSnapshot`) | ~2.9 ms and ~1.1 MB per snapshot, once per second per run/worker |
+| Publish hot path | `RecordPublishLatency` ~37 ns/op, 0 allocations; payload template ~195 ns/op, 0 allocations |
+| Live 1,500-client MQTT 5 run on Mosquitto | Correlation-rejected counter recorded 26 of ~780k samples on a single host (WSL2 clock adjustment), below the 0.1% warning threshold |
+| Browser at 320/375/768/1440 px | No horizontal overflow; wizard focus stays inside the dialog; no CSP violations |
+| Mermaid diagrams | All 8 render with mermaid-cli |

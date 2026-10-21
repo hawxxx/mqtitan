@@ -5,6 +5,8 @@ services:
     image: ${MQTITAN_IMAGE:-mqtitan:local}
     environment:
       MQTITAN_TOKEN: ${MQTITAN_TOKEN:?Set MQTITAN_TOKEN to a random bearer token}
+      # Optional separate worker credential; see docs/operations.md.
+      MQTITAN_WORKER_TOKEN: ${MQTITAN_WORKER_TOKEN:-}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:
@@ -34,7 +36,7 @@ services:
     profiles: [workers]
     command: ["worker", "--controller", "http://controller:8080", "--id", "compose-worker-1"]
     environment:
-      MQTITAN_TOKEN: ${MQTITAN_TOKEN:?Set MQTITAN_TOKEN}
+      MQTITAN_WORKER_TOKEN: ${MQTITAN_WORKER_TOKEN:-${MQTITAN_TOKEN:?Set MQTITAN_TOKEN}}
     depends_on:
       controller:
         condition: service_healthy

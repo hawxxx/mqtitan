@@ -22,7 +22,7 @@ broker:
     serverName: mqtt.example.com
 ```
 
-Use an actual profile ID from your controller. Profile references are controller-specific, not portable secret exports. For CLI execution, submit the scenario with `--controller` pointing to that controller. Standalone CLI runs on another database need local `caFile`, `certFile` and `keyFile` settings instead. Do not combine profile references with local file paths or inline PEM fields.
+Use an actual profile ID from your controller. Profile references are controller-specific, not portable secret exports. For CLI execution, submit the scenario with `--controller` pointing to that controller. Standalone CLI runs on another database need local `caFile`, `certFile` and `keyFile` settings instead. The API (dashboard, `--controller` submissions, plans and reruns) rejects these file paths so a caller cannot make the controller read files from its own filesystem. Do not combine profile references with local file paths or inline PEM fields.
 
 ## Security and limits
 

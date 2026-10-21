@@ -210,7 +210,7 @@ pre,
   display: block;
   font-family: "IBM Plex Mono", monospace;
   letter-spacing: 1.8px;
-  font-size: 8px;
+  font-size: 10px;
   color: var(--muted);
   margin-top: 4px;
 }
@@ -324,7 +324,7 @@ nav a.active:before {
 .engine-state small {
   margin-left: auto;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+  font-size: 10px;
 }
 .theme-button {
   border: 0;
@@ -392,7 +392,7 @@ main {
 .eyebrow {
   font-family: "IBM Plex Mono", monospace;
   color: var(--teal);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 1.7px;
   margin-bottom: 12px;
 }
@@ -425,7 +425,7 @@ main {
 }
 .metric > span {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
   letter-spacing: 1.2px;
   color: var(--muted);
@@ -705,7 +705,7 @@ thead {
 }
 th {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
   font-weight: 500;
   text-transform: uppercase;
@@ -744,7 +744,7 @@ tbody tr:hover {
   display: block;
   color: var(--muted);
   font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+  font-size: 10px;
   margin-top: 5px;
 }
 .run-icon {
@@ -755,7 +755,7 @@ tbody tr:hover {
 }
 .badge {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+  font-size: 10px;
   padding: 5px 8px;
   border-radius: 4px;
   display: inline-flex;
@@ -839,7 +839,7 @@ footer {
   color: var(--muted);
 }
 footer > .mono {
-  font-size: 9px;
+  font-size: 10px;
 }
 .notice {
   display: flex;
@@ -1226,7 +1226,7 @@ textarea:focus {
 }
 [data-theme="light"] .badge.failed {
   background: #fce9e5;
-  color: #b34d3e;
+  color: #a3402f;
 }
 [data-theme="light"] .metric.accent strong {
   color: #16836e;
@@ -1295,7 +1295,7 @@ textarea:focus {
   .nav-label,
   nav a span,
   .sidebar-bottom .engine-state,
-  .theme-button {
+  .theme-button .label {
     display: none;
   }
   nav {
@@ -1309,11 +1309,9 @@ textarea:focus {
     display: flex;
     justify-content: center;
   }
-  .sidebar-bottom:after {
-    content: "MQ";
-    font-family: "IBM Plex Mono", monospace;
-    color: var(--muted);
-    font-size: 10px;
+  .theme-button {
+    justify-content: center;
+    padding: 10px;
   }
   .main-column {
     margin-left: 72px;
@@ -1352,7 +1350,7 @@ textarea:focus {
     flex-wrap: wrap;
     gap: 15px;
   }
-  .topbar-new {
+  .topbar-new .label {
     display: none;
   }
   .two-col {
@@ -1361,7 +1359,7 @@ textarea:focus {
   .tabs {
     gap: 18px;
   }
-  .stream {
+  .stream .label {
     display: none;
   }
 }
@@ -1399,7 +1397,7 @@ textarea:focus {
     font-size: 23px;
   }
   .metric > span {
-    font-size: 8px;
+    font-size: 10px;
     letter-spacing: 0.7px;
   }
   .metric small {
@@ -1458,7 +1456,7 @@ textarea:focus {
     gap: 10px;
   }
   .panel-footer > span {
-    font-size: 9px;
+    font-size: 10px;
   }
   .tabs {
     gap: 17px;
@@ -1569,7 +1567,7 @@ textarea:focus {
   border-radius: 2px 2px 0 0;
 }
 .histogram-bin > span {
-  font-size: 9px;
+  font-size: 10px;
   white-space: nowrap;
   color: var(--muted);
   text-align: center;
@@ -1756,7 +1754,7 @@ textarea:focus {
 }
 .load-slider-readout > span {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.9px;
   color: var(--muted);
 }
@@ -1852,7 +1850,7 @@ textarea:focus {
   height: 25px;
   margin: 0 10px;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--muted);
 }
 .load-slider-ticks > span {
@@ -1965,7 +1963,7 @@ textarea:focus {
     font-size: 26px;
   }
   .load-slider-readout > span {
-    font-size: 8px;
+    font-size: 10px;
     letter-spacing: 0.5px;
   }
   .load-presets button {
@@ -2069,4 +2067,69 @@ textarea:focus {
   letter-spacing: 0;
   text-transform: none;
   opacity: 0.75;
+}
+/* Accessibility and responsive refinements. */
+.table-scroll:focus-visible,
+.tab-panel:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+}
+.error-row {
+  flex-wrap: wrap;
+}
+.error-row > div {
+  min-width: 0;
+  flex: 1 1 160px;
+}
+.tabs {
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+/* Keep the wizard actions in view: the footer sticks to the scroll edge and
+   absorbs the modal's bottom padding so fields never show beneath it. */
+.modal {
+  padding-bottom: 0;
+}
+.modal-footer {
+  position: sticky;
+  bottom: 0;
+  margin-inline: -26px;
+  padding: 14px 26px 26px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  z-index: 1;
+}
+@media (max-width: 560px) {
+  .modal-footer {
+    margin-inline: -20px;
+    padding: 12px 20px 20px;
+  }
+}
+.run-warning {
+  margin: 0 0 18px;
+}
+@media (max-width: 560px) {
+  .run-table .col-clients,
+  .run-table .col-messages {
+    display: none;
+  }
+}
+.notice.warning {
+  border-color: #574b34;
+  background: #2a251b;
+  color: var(--amber);
+}
+.notice.warning p {
+  margin: 0;
+  line-height: 1.5;
+}
+[data-theme="light"] .notice.warning {
+  border-color: #e3cfa5;
+  background: #fbf4e4;
+}
+.draft-applied {
+  color: var(--muted);
+  font-size: 11px;
 }

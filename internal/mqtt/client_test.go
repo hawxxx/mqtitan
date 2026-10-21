@@ -266,3 +266,13 @@ func TestKeepAliveRoundsUp(t *testing.T) {
 		}
 	}
 }
+
+func TestPacketTimeoutCoversConfiguredTimeouts(t *testing.T) {
+	b := scenario.Broker{ConnectTimeout: scenario.Duration{Duration: 30 * time.Second}, OperationTimeout: scenario.Duration{Duration: 20 * time.Second}}
+	if got := packetTimeout(b); got != 30*time.Second {
+		t.Fatalf("packetTimeout = %s, want 30s", got)
+	}
+	if got := packetTimeout(scenario.Broker{}); got != 10*time.Second {
+		t.Fatalf("default packetTimeout = %s, want 10s", got)
+	}
+}

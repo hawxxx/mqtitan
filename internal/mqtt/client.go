@@ -292,7 +292,7 @@ func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	conn = packets.NewThreadSafeConn(conn)
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
-	c := paho.NewClient(paho.ClientConfig{Conn: conn, ClientID: id, PacketTimeout: 10 * time.Second, OnPublishReceived: []func(paho.PublishReceived) (bool, error){func(p paho.PublishReceived) (bool, error) { receive(p.Packet.Payload); return true, nil }}})
+	c := paho.NewClient(paho.ClientConfig{Conn: conn, ClientID: id, PacketTimeout: packetTimeout(b), OnPublishReceived: []func(paho.PublishReceived) (bool, error){func(p paho.PublishReceived) (bool, error) { receive(p.Packet.Payload); return true, nil }}})
 	keep := uint16(30)
 	if b.KeepAlive.Duration > 0 {
 		keep = keepAliveSeconds(b.KeepAlive.Duration)
@@ -335,4 +335,11 @@ func (c *client5) Subscribe(ctx context.Context, topic string, qos byte) error {
 		}
 	}
 	return nil
+}
+
+// packetTimeout bounds paho.golang's CONNECT, SUBSCRIBE and QoS 1/2 PUBLISH
+// waits. The library caps each context deadline at this value, so it must
+// not be shorter than the scenario's connect and operation timeouts.
+func packetTimeout(b scenario.Broker) time.Duration {
+	return max(10*time.Second, b.ConnectTimeout.Duration, b.OperationTimeout.Duration)
 }

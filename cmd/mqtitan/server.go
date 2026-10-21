@@ -94,7 +94,7 @@ func openServer(o runOptions) (*localServer, error) {
 		return nil, err
 	}
 	assets, _ := web.FS()
-	apiOptions := api.Options{Token: token, WebFS: assets, Authorize: authorize}
+	apiOptions := api.Options{Token: token, WorkerToken: os.Getenv("MQTITAN_WORKER_TOKEN"), WebFS: assets, Authorize: authorize}
 	if o.Web != "" {
 		apiOptions.WebFS = nil
 		apiOptions.WebDir = o.Web
@@ -184,7 +184,7 @@ func executeScenario(raw string, o runOptions) error {
 		return err
 	}
 	defer l.Close()
-	test, err := l.manager.StartOnWorkers(raw, ids)
+	test, err := l.manager.StartLocal(raw, ids)
 	if err != nil {
 		return err
 	}
@@ -272,9 +272,18 @@ func workerCommand(args []string) error {
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(listener) }()
 	defer srv.Close()
-	err = worker.Run(ctx, worker.Options{Controller: *controller, ID: *id, Token: os.Getenv("MQTITAN_TOKEN"), OnReady: ready.Store})
+	err = worker.Run(ctx, worker.Options{Controller: *controller, ID: *id, Token: workerToken(), OnReady: ready.Store})
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}
 	return err
+}
+
+// workerToken prefers the dedicated worker credential and falls back to the
+// control token for controllers that do not separate them.
+func workerToken() string {
+	if v := os.Getenv("MQTITAN_WORKER_TOKEN"); v != "" {
+		return v
+	}
+	return os.Getenv("MQTITAN_TOKEN")
 }

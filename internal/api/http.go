@@ -1,6 +1,7 @@
 package api
 
 import (
+	"compress/gzip"
 	"crypto/subtle"
 	"encoding/csv"
 	"encoding/json"
@@ -20,10 +21,16 @@ import (
 )
 
 type Options struct {
-	Token     string
-	WebDir    string
-	WebFS     fs.FS
-	Authorize func(*http.Request) bool
+	Token string
+	// WorkerToken, when set, is the only credential accepted on the worker
+	// registration and heartbeat routes, and is rejected everywhere else.
+	// Assignments carry resolved broker credentials, so a leaked worker
+	// token must not grant control and the control token must not pose as
+	// a worker.
+	WorkerToken string
+	WebDir      string
+	WebFS       fs.FS
+	Authorize   func(*http.Request) bool
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -38,7 +45,19 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 func input(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
-	d := json.NewDecoder(r.Body)
+	var body io.Reader = r.Body
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		// Workers compress reports: dense latency histograms are mostly zeros.
+		// Bound the decompressed size as well as the compressed body.
+		z, err := gzip.NewReader(r.Body)
+		if err != nil {
+			writeError(w, 400, "INVALID_REQUEST", "invalid gzip body")
+			return false
+		}
+		defer z.Close()
+		body = &io.LimitedReader{R: z, N: 8 << 20}
+	}
+	d := json.NewDecoder(body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		writeError(w, 400, "INVALID_REQUEST", "invalid request body")
@@ -297,6 +316,21 @@ func Handler(m *Manager, opts Options) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
+		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
+		w.Header().Set("X-Frame-Options", "DENY")
+		if workerRoute(r.URL.Path) && opts.WorkerToken != "" {
+			if !bearer(r, opts.WorkerToken) {
+				w.Header().Set("WWW-Authenticate", "Bearer")
+				writeError(w, 401, "UNAUTHORIZED", "valid worker token required")
+				return
+			}
+			mux.ServeHTTP(w, r)
+			return
+		}
+		if opts.WorkerToken != "" && bearer(r, opts.WorkerToken) && opts.WorkerToken != opts.Token {
+			writeError(w, 403, "FORBIDDEN", "worker token is only valid on worker routes")
+			return
+		}
 		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics") {
 			if opts.Authorize != nil || opts.Token != "" {
 				auth := r.Header.Get("Authorization")
@@ -304,7 +338,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 				if opts.Authorize != nil {
 					authorized = opts.Authorize(r)
 				} else if strings.HasPrefix(auth, "Bearer ") {
-					authorized = subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(auth, "Bearer ")), []byte(opts.Token)) == 1
+					authorized = bearer(r, opts.Token)
 				}
 				if !authorized {
 					w.Header().Set("WWW-Authenticate", "Bearer")
@@ -321,6 +355,18 @@ func Handler(m *Manager, opts Options) http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// The dashboard loads its own scripts and Google Fonts; React sets inline
+// style attributes, so style-src needs 'unsafe-inline'.
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+func workerRoute(path string) bool {
+	return path == "/api/v1/workers/register" || path == "/api/v1/workers/heartbeat"
+}
+func bearer(r *http.Request, token string) bool {
+	given, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return ok && token != "" && subtle.ConstantTimeCompare([]byte(given), []byte(token)) == 1
 }
 func sameOrigin(origin, host string) bool {
 	return origin == "http://"+host || origin == "https://"+host

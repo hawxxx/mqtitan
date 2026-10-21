@@ -161,7 +161,7 @@ func TestRestartMarksRunInterrupted(t *testing.T) {
 func TestLocalEngineSetupErrorIsReported(t *testing.T) {
 	m, _ := setup(t)
 	raw := strings.Replace(testScenario, "url: mqtt://127.0.0.1:1", "url: mqtts://127.0.0.1:1\n  tls:\n    caFile: "+filepath.Join(t.TempDir(), "missing-ca.pem"), 1)
-	started, err := m.Start(raw)
+	started, err := m.StartLocal(raw, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

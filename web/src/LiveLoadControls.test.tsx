@@ -200,3 +200,34 @@ it("disables publisher presets and sliders for connection-only runs", () => {
     ).disabled,
   ).toBe(true);
 });
+
+it("clears the draft when values return to the applied manual load", async () => {
+  const manual = {
+    ...test,
+    loadControl: { ...test.loadControl!, manual: true, revision: 1 },
+  } as Test;
+  render(<LiveLoadControls test={manual} onUpdated={vi.fn()} />);
+  const clients = screen.getByRole("spinbutton", { name: "Client target" });
+  await userEvent.clear(clients);
+  await userEvent.type(clients, "250");
+  expect(screen.getByText("Unapplied changes")).toBeTruthy();
+  expect(screen.getByText(/Applied: 100 clients/)).toBeTruthy();
+  await userEvent.clear(clients);
+  await userEvent.type(clients, "100");
+  expect(screen.getByText("No draft changes")).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Apply load" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+});
+
+it("lets a stage-driven run be pinned at its current values", async () => {
+  render(<LiveLoadControls test={test} onUpdated={vi.fn()} />);
+  const clients = screen.getByRole("spinbutton", { name: "Client target" });
+  await userEvent.clear(clients);
+  await userEvent.type(clients, "100");
+  expect(
+    (screen.getByRole("button", { name: "Apply load" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
+});

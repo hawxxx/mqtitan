@@ -24,6 +24,13 @@ spec:
                 secretKeyRef:
                   name: {{ required "auth.existingSecret is required" .Values.auth.existingSecret }}
                   key: {{ .Values.auth.key }}
+            {{- if .Values.auth.workerKey }}
+            - name: MQTITAN_WORKER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.existingSecret }}
+                  key: {{ .Values.auth.workerKey }}
+            {{- end }}
           ports: [{name: http, containerPort: 8080}]
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           readinessProbe: {httpGet: {path: /readyz, port: http}, initialDelaySeconds: 2, periodSeconds: 5}

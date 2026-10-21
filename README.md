@@ -50,7 +50,7 @@ Use [live load controls](docs/live-controls.md) to adjust client targets and mes
 
 Open a finished test and click **Run again** to launch a fresh run from its original scenario while preserving the previous results. Credentials are reused server-side, and recorded workers are retained. See [rerunning tests](docs/reruns.md) for legacy runs and worker availability.
 
-See [architecture](docs/architecture/overview.md), [scenario specification](docs/scenario-spec.md), and [roadmap](docs/roadmap.md).
+See [architecture](docs/architecture/overview.md), [diagrams](docs/architecture/diagrams.md), [scenario specification](docs/scenario-spec.md), and [roadmap](docs/roadmap.md).
 
 ## Feature tour
 

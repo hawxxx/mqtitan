@@ -206,3 +206,18 @@ it("closes the wizard on Escape and records MQTT version and payload size", asyn
   await userEvent.keyboard("{Escape}");
   expect(close).toHaveBeenCalled();
 });
+it("moves focus into the wizard and keeps Tab inside it", async () => {
+  const opener = document.createElement("button");
+  document.body.appendChild(opener);
+  opener.focus();
+  const { unmount } = render(<Wizard done={() => {}} close={() => {}} />);
+  const dialog = screen.getByRole("dialog");
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  for (let i = 0; i < 30; i++) {
+    await userEvent.tab();
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  }
+  unmount();
+  expect(document.activeElement).toBe(opener);
+  opener.remove();
+});

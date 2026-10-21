@@ -67,7 +67,7 @@ The scenario path or test ID on `run`, `stop`, `results`, and `export` may come 
   --controller http://controller.example.com:8080 --workers worker-a
 ```
 
-Use unique worker IDs and separate health ports for multiple workers on one host. Supply `MQTITAN_TOKEN` to the controller, worker, and remote CLI when using bearer authentication. Use an authenticated TLS reverse proxy for remote deployment. See [operations](operations.md) for Compose and Helm.
+Use unique worker IDs and separate health ports for multiple workers on one host. Supply `MQTITAN_TOKEN` to the controller and remote CLI when using bearer authentication. Workers use `MQTITAN_WORKER_TOKEN` when the controller sets one (recommended) and fall back to `MQTITAN_TOKEN` otherwise. Use an authenticated TLS reverse proxy for remote deployment. See [operations](operations.md) for Compose and Helm.
 
 ## Credentials and CI
 

@@ -85,7 +85,7 @@ func (m *Manager) UpdateLoad(id string, request LoadRequest) (Test, error) {
 	defer m.workers.mu.Unlock()
 	for _, id := range r.workerIDs {
 		w := m.workers.workers[id]
-		if w == nil || !w.SupportsLiveControl || time.Since(w.LastSeen) > 15*time.Second || w.assignment == nil || w.assignment.TestID != r.test.ID || w.report.Done {
+		if w == nil || !w.SupportsLiveControl || time.Since(w.LastSeen) > workerLease || w.assignment == nil || w.assignment.TestID != r.test.ID || w.report.Done {
 			return Test{}, errors.New("assigned workers must be healthy and support live controls; upgrade workers if needed")
 		}
 	}

@@ -38,8 +38,13 @@ spec:
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
             - name: CONTROLLER_URL
               valueFrom: {configMapKeyRef: {name: "{{ .Release.Name }}-config", key: controllerURL}}
+            {{- if .Values.auth.workerKey }}
+            - name: MQTITAN_WORKER_TOKEN
+              valueFrom: {secretKeyRef: {name: "{{ .Values.auth.existingSecret }}", key: "{{ .Values.auth.workerKey }}"}}
+            {{- else }}
             - name: MQTITAN_TOKEN
               valueFrom: {secretKeyRef: {name: "{{ .Values.auth.existingSecret }}", key: "{{ .Values.auth.key }}"}}
+            {{- end }}
           securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}

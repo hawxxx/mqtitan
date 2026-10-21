@@ -16,7 +16,7 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	counters := map[string]uint64{"connections_total": 0, "connection_errors_total": 0, "messages_published_total": 0, "messages_received_total": 0, "publish_errors_total": 0, "bytes_sent_total": 0, "bytes_received_total": 0, "reconnects_total": 0, "disconnects_total": 0, "publishes_cancelled_total": 0}
+	counters := map[string]uint64{"connections_total": 0, "connection_errors_total": 0, "messages_published_total": 0, "messages_received_total": 0, "publish_errors_total": 0, "bytes_sent_total": 0, "bytes_received_total": 0, "reconnects_total": 0, "disconnects_total": 0, "publishes_cancelled_total": 0, "publish_slots_missed_total": 0, "correlation_rejected_total": 0}
 	var connected int64
 	var count uint64
 	sum := 0.0
@@ -36,6 +36,8 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 		counters["reconnects_total"] += s.Reconnects
 		counters["disconnects_total"] += s.Disconnects
 		counters["publishes_cancelled_total"] += s.PublishCancelled
+		counters["publish_slots_missed_total"] += s.PublishSlotsMissed
+		counters["correlation_rejected_total"] += s.CorrelationRejected
 		count += s.PublishLatencyCount
 		sum += s.PublishLatencySum.Seconds()
 		for _, b := range s.Histogram {
@@ -62,6 +64,9 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 		cumulative += buckets[b]
 		fmt.Fprintf(w, "emqxload_publish_latency_seconds_bucket{le=%q} %d\n", strconv.FormatFloat(b.Seconds(), 'g', -1, 64), cumulative)
 	}
+	// Buckets include coordinated-omission corrections for slots that queued
+	// behind slow publishes; keep +Inf and _count consistent with them.
+	count = max(count, cumulative)
 	fmt.Fprintf(w, "emqxload_publish_latency_seconds_bucket{le=\"+Inf\"} %d\nemqxload_publish_latency_seconds_sum %g\nemqxload_publish_latency_seconds_count %d\n", count, sum, count)
 	// Quantiles describe the latest run. Historical comparisons use the API.
 	if len(tests) > 0 {
