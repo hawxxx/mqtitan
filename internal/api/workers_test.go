@@ -75,6 +75,9 @@ func TestHeartbeatRequiresTheIssuedSession(t *testing.T) {
 func TestLiveOrAssignedWorkerIDCannotBeTakenOver(t *testing.T) {
 	r := newWorkerRegistry()
 	session := register(t, r, "worker-a")
+	if _, err := r.heartbeat(Heartbeat{ID: "worker-a", Session: session}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := r.register(Worker{ID: "worker-a"}); err == nil {
 		t.Fatal("a second process took over a live worker ID")
 	}
@@ -189,5 +192,26 @@ func TestLostWorkerHoldsNoLiveClients(t *testing.T) {
 	s := m.workerSnapshot(r)
 	if s.Connected != 0 || s.Connecting != 0 || s.TargetClients != 0 || s.Published != 1000 {
 		t.Fatalf("lost worker snapshot = %+v", s)
+	}
+}
+
+func TestLostRegistrationResponseCanBeRetried(t *testing.T) {
+	r := newWorkerRegistry()
+	register(t, r, "worker-a") // response lost: the worker never saw the session
+	if _, err := r.register(Worker{ID: "worker-a"}); err != nil {
+		t.Fatalf("retry after a lost registration response refused: %v", err)
+	}
+}
+
+func TestPeakNeverBelowSingleWorkerPeak(t *testing.T) {
+	m, _ := setup(t)
+	r := &execution{workerIDs: []string{"a"}}
+	register(t, m.workers, "a")
+	m.workers.mu.Lock()
+	// Connected and finished between two controller samples.
+	m.workers.workers["a"].report = Report{Done: true, Snapshot: metrics.Snapshot{PeakConnected: 50, ConnectAttempts: 50}}
+	m.workers.mu.Unlock()
+	if got := m.workerSnapshot(r).PeakConnected; got != 50 {
+		t.Fatalf("peak = %d, want 50", got)
 	}
 }

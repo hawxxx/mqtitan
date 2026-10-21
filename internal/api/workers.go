@@ -39,8 +39,9 @@ type Assignment struct {
 }
 type workerState struct {
 	Worker
-	assignment *Assignment
-	report     Report
+	assignment  *Assignment
+	report      Report
+	heartbeated bool
 }
 type Report struct {
 	AssignmentID    string               `json:"assignmentId"`
@@ -111,7 +112,9 @@ func (r *workerRegistry) register(w Worker) (string, error) {
 		// results of, a partition assigned to a running test.
 		return "", errors.New("worker ID is assigned to a running test; wait for the test to finish or use another ID")
 	}
-	if existing != nil && !owner && now.Sub(existing.LastSeen) <= workerLease {
+	// An entry that never heartbeated belongs to a registration whose
+	// response was lost; the retrying worker may replace it immediately.
+	if existing != nil && !owner && existing.heartbeated && now.Sub(existing.LastSeen) <= workerLease {
 		return "", errors.New("worker ID is in use by a live worker; use another ID")
 	}
 	w.Session = ID() + ID()
@@ -156,6 +159,7 @@ func (r *workerRegistry) heartbeat(h Heartbeat) (HeartbeatResponse, error) {
 	}
 	now := time.Now().UTC()
 	s.LastSeen = now
+	s.heartbeated = true
 	s.MemoryBytes = h.MemoryBytes
 	s.ClockOffsetMS = float64(now.Sub(h.ClientTime).Microseconds()) / 1000
 	if h.Report != nil && s.assignment != nil && h.Report.AssignmentID == s.assignment.ID {

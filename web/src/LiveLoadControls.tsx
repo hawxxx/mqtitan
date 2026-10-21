@@ -21,6 +21,10 @@ export function LiveLoadControls({
   const [clients, setClients] = useState(target);
   const [rate, setRate] = useState(control.ratePerClient);
   const [dirty, setDirty] = useState(false);
+  const [draftBase, setDraftBase] = useState({
+    clients: target,
+    rate: control.ratePerClient,
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -47,10 +51,14 @@ export function LiveLoadControls({
     rate >= 0 &&
     rate <= control.maxRatePerClient;
   const running = test.status === "running";
-  // A draft only counts as changed while it differs from the applied load,
-  // so moving a slider away and back clears "Unapplied changes".
+  // A draft counts as changed while it differs from the load in force when
+  // editing began, so moving a slider away and back clears it. While stages
+  // still drive the load, applying any draft pins it as a manual override.
   const changed =
-    dirty && (clients !== target || rate !== control.ratePerClient);
+    dirty &&
+    (!control.manual ||
+      clients !== draftBase.clients ||
+      rate !== draftBase.rate);
   function resetDraft() {
     setClients(target);
     setRate(control.ratePerClient);
@@ -58,12 +66,17 @@ export function LiveLoadControls({
     setError("");
     setMessage("");
   }
+  function beginEdit() {
+    if (!dirty) setDraftBase({ clients: target, rate: control.ratePerClient });
+  }
   function editClients(value: number) {
+    beginEdit();
     setClients(value);
     setDirty(true);
     setMessage("");
   }
   function editRate(value: number) {
+    beginEdit();
     setRate(value);
     setDirty(true);
     setMessage("");
@@ -124,8 +137,8 @@ export function LiveLoadControls({
           </span>
           {changed && (
             <span className="draft-applied">
-              Applied: {number(target)} clients ·{" "}
-              {number(control.ratePerClient)} msg/s
+              Applied: {number(draftBase.clients)} clients ·{" "}
+              {number(draftBase.rate)} msg/s
             </span>
           )}
           {changed && (

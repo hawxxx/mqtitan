@@ -79,9 +79,13 @@ func (m *Manager) workerSnapshot(r *execution) metrics.Snapshot {
 	}
 	merged := metrics.MergeSnapshots(snapshots, distributions)
 	// Per-worker peaks can occur at different times, so their sum overstates
-	// concurrency. Report the highest aggregate connection count the
-	// controller observed instead; it is sampled, so it can miss short spikes.
+	// concurrency. Report the highest aggregate the controller observed, which
+	// is sampled and can miss a short burst, but never less than the largest
+	// single-worker peak, which is a true lower bound.
 	r.peakConnected = max(r.peakConnected, merged.Connected)
+	for _, s := range snapshots {
+		r.peakConnected = max(r.peakConnected, s.PeakConnected)
+	}
 	merged.PeakConnected = r.peakConnected
 	return merged
 }
