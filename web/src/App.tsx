@@ -111,12 +111,20 @@ function Empty({
     </div>
   );
 }
-function ErrorNotice({ error, retry }: { error: unknown; retry?: () => void }) {
+function ErrorNotice({
+  error,
+  retry,
+  title = "Unable to complete request",
+}: {
+  error: unknown;
+  retry?: () => void;
+  title?: string;
+}) {
   return (
     <div className="notice error" role="alert">
       <TriangleAlert size={18} />
       <div>
-        <strong>Unable to complete request</strong>
+        <strong>{title}</strong>
         <p>{error instanceof Error ? error.message : String(error)}</p>
       </div>
       {retry && (
@@ -1295,8 +1303,14 @@ function TestDetail({ id }: { id: string }) {
           . Original results are unchanged.
         </p>
       )}
-      {(stop.error || exportError || t.error) && (
-        <ErrorNotice error={stop.error || exportError || t.error} />
+      {(stop.error || exportError) && (
+        <ErrorNotice error={stop.error || exportError} />
+      )}
+      {t.error && (
+        <ErrorNotice
+          error={t.error}
+          title={t.status === "running" ? "Run problem" : "Run failed"}
+        />
       )}
       {runWarnings(t).map((w) => (
         <div className="notice warning run-warning" role="status" key={w}>
