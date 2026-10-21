@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -54,15 +55,22 @@ func Run(ctx context.Context, opts Options) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	base := strings.TrimRight(opts.Controller, "/")
 	post := func(path string, body, out any) error {
-		b, err := json.Marshal(body)
-		if err != nil {
+		// Reports carry three dense HDR histograms (~130 KB of JSON, mostly
+		// zeros); gzip reduces them to a few kilobytes per heartbeat.
+		var b bytes.Buffer
+		z := gzip.NewWriter(&b)
+		if err := json.NewEncoder(z).Encode(body); err != nil {
 			return err
 		}
-		r, err := http.NewRequestWithContext(ctx, "POST", base+path, bytes.NewReader(b))
+		if err := z.Close(); err != nil {
+			return err
+		}
+		r, err := http.NewRequestWithContext(ctx, "POST", base+path, &b)
 		if err != nil {
 			return err
 		}
 		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Content-Encoding", "gzip")
 		if opts.Token != "" {
 			r.Header.Set("Authorization", "Bearer "+opts.Token)
 		}

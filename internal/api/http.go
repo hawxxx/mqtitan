@@ -1,6 +1,7 @@
 package api
 
 import (
+	"compress/gzip"
 	"crypto/subtle"
 	"encoding/csv"
 	"encoding/json"
@@ -44,7 +45,19 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 func input(w http.ResponseWriter, r *http.Request, v any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
-	d := json.NewDecoder(r.Body)
+	var body io.Reader = r.Body
+	if r.Header.Get("Content-Encoding") == "gzip" {
+		// Workers compress reports: dense latency histograms are mostly zeros.
+		// Bound the decompressed size as well as the compressed body.
+		z, err := gzip.NewReader(r.Body)
+		if err != nil {
+			writeError(w, 400, "INVALID_REQUEST", "invalid gzip body")
+			return false
+		}
+		defer z.Close()
+		body = &io.LimitedReader{R: z, N: 8 << 20}
+	}
+	d := json.NewDecoder(body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(v); err != nil {
 		writeError(w, 400, "INVALID_REQUEST", "invalid request body")

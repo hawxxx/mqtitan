@@ -1,6 +1,7 @@
 package api
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -62,4 +63,29 @@ func TestAPIRejectsTLSFilePathsButLocalCLIAcceptsThem(t *testing.T) {
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+func TestGzipBodiesAreDecodedAndBounded(t *testing.T) {
+	_, h := setup(t)
+	send := func(payload []byte) int {
+		var b strings.Builder
+		z := gzip.NewWriter(&b)
+		_, _ = z.Write(payload)
+		_ = z.Close()
+		r := httptest.NewRequest("POST", "/api/v1/workers/register", strings.NewReader(b.String()))
+		r.Header.Set("Authorization", "Bearer controller-secret")
+		r.Header.Set("Content-Encoding", "gzip")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if got := send([]byte(`{"id":"gz"}`)); got != 201 {
+		t.Fatalf("gzip registration = %d, want 201", got)
+	}
+	// 16 MiB of zeros compresses below the 2 MiB body cap; the decompressed
+	// stream must still be refused.
+	bomb := append([]byte(`{"id":"`), make([]byte, 16<<20)...)
+	if got := send(bomb); got != 400 {
+		t.Fatalf("decompression bomb = %d, want 400", got)
+	}
 }

@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -78,7 +79,9 @@ func TestWorkerSendsSessionAndKeepsRegistrationOnRejectedReport(t *testing.T) {
 		var h struct {
 			Session string `json:"session"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&h)
+		if z, err := gzip.NewReader(r.Body); err == nil {
+			_ = json.NewDecoder(z).Decode(&h)
+		}
 		if h.Session != "s3cret" {
 			badSession.Store(true)
 		}
