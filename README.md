@@ -4,7 +4,7 @@ MQTTitan is an open-source MQTT load-testing platform for EMQX and standards-com
 
 ## Quick start
 
-Prerequisites: Go 1.25, Node.js 22, npm, Make, and a running MQTT broker. The source build embeds the dashboard in one binary.
+Prerequisites: Go 1.26, Node.js 22, npm, Make, and a running MQTT broker. The source build embeds the dashboard in one binary.
 
 ```bash
 git clone https://github.com/hawxxx/mqtitan.git
