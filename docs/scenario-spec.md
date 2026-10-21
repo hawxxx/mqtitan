@@ -33,7 +33,9 @@ thresholds:
   publish_latency_p95: "<50ms"
 ```
 
-Workload types are publisher, subscriber, mixed and connection. Publisher and mixed workloads require clients, topic, qos, ratePerClient and payload. Subscribers require clients, topic and qos; connection workloads require clients only. Workload groups occupy contiguous, disjoint client populations; their total clients must not exceed clients.count. A mixed client subscribes to and publishes on its own resolved topic. Use separate publisher and subscriber groups for fan-out.
+Workload types are publisher, subscriber, mixed and connection. Publisher and mixed workloads require clients, topic, qos, ratePerClient and payload. Subscribers require clients, topic and qos; connection workloads require clients only. Workload groups occupy contiguous, disjoint client populations; their total clients must not exceed clients.count. A mixed client subscribes to and publishes on its own resolved topic. Use separate publisher and subscriber groups for fan-out. Stage targets select a prefix of the global client population, so put the groups that must always connect first: `plan` warns when a workload starts beyond the highest stage target and would never connect.
+
+Payload values are compiled during validation exactly as the engine compiles them, so unknown variables, templates that expand beyond `size`, and JSON templates that expand to invalid JSON are rejected before a run starts. Numeric variables such as `${counter}` and `${random.float:18:32}` may appear unquoted in JSON templates; `${timestamp}` and `${uuid}` produce strings and must be quoted.
 
 Broker versions 3.1.1 and 5 (or 5.0) select the protocol transport. MQTT 5 support does not imply configurable MQTT 5 properties, topic aliases or shared-subscription orchestration. Topic and client-ID templates support ${clientId}, ${sequence:06} and ${worker}; choose unique client-ID prefixes for concurrent runs. Distributed partitions preserve the global sequence offset.
 

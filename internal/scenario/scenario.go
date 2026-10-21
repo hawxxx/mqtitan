@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mqtitan/mqtitan/internal/payload"
 	"gopkg.in/yaml.v3"
 )
 
@@ -237,8 +238,10 @@ func (s Scenario) Validate() error {
 		if w.Payload.Type != "" && w.Payload.Type != "static" && w.Payload.Type != "random" && w.Payload.Type != "json" {
 			problems = append(problems, "unsupported payload type")
 		}
-		if w.Payload.Type == "json" && w.Payload.Value != "" && !json.Valid([]byte(w.Payload.Value)) {
+		if w.Payload.Type == "json" && w.Payload.Value != "" && !json.Valid([]byte(templateVariable.ReplaceAllString(w.Payload.Value, "0"))) {
 			problems = append(problems, "payload.value must be valid JSON")
+		} else if err := checkPayload(w.Payload); err != nil {
+			problems = append(problems, fmt.Sprintf("workload %q payload: %v", w.Name, err))
 		}
 	}
 	if population > s.Clients.Count {
@@ -250,6 +253,18 @@ func (s Scenario) Validate() error {
 	return nil
 }
 
+// checkPayload compiles the template the way the engine does, so unknown
+// variables, oversize expansions and invalid expanded JSON fail validation
+// instead of failing the run after it starts.
+func checkPayload(p Payload) error {
+	if p.Size < 0 || p.Size > 16<<20 {
+		return nil // reported above
+	}
+	value := strings.ReplaceAll(Expand(p.Value, 1, "client-1"), "${worker}", "worker")
+	_, err := payload.New(payload.Spec{Type: p.Type, Value: value, Size: p.Size}, payload.Variables{ClientID: "client-1", Worker: "worker", Sequence: 1})
+	return err
+}
+
 type Plan struct {
 	PeakClients                 int
 	Duration                    time.Duration
@@ -258,6 +273,9 @@ type Plan struct {
 	EstimatedMemoryBytes        int64
 	EstimatedFileDescriptors    int
 	EstimatedWireBytesPerSecond float64
+	// Warnings flag workloads that no stage ever reaches; they would silently
+	// contribute nothing (for example subscribers listed after publishers).
+	Warnings []string
 }
 
 func (s Scenario) Plan() Plan {
@@ -272,8 +290,12 @@ func (s Scenario) Plan() Plan {
 	payload := 0
 	rate := 0.0
 	offset := 0
+	var warnings []string
 	for _, w := range s.Workloads {
 		n := max(0, min(w.Clients, peak-offset))
+		if n == 0 {
+			warnings = append(warnings, fmt.Sprintf("workload %q (clients %d-%d) never connects: the highest stage target is %d; reorder workloads or raise a stage target", w.Name, offset+1, offset+w.Clients, peak))
+		}
 		offset += w.Clients
 		size := max(len(w.Payload.Value), w.Payload.Size)
 		payload = max(payload, size)
@@ -281,5 +303,5 @@ func (s Scenario) Plan() Plan {
 			rate += float64(n) * w.RatePerClient
 		}
 	}
-	return Plan{peak, duration, rate, payload, int64(peak) * 96 * 1024, peak*2 + 128, rate * float64(payload+64)}
+	return Plan{peak, duration, rate, payload, int64(peak) * 96 * 1024, peak*2 + 128, rate * float64(payload+64), warnings}
 }

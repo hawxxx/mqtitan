@@ -31,3 +31,20 @@ func TestAssessPlanUsesSourceIPsAndReportsUnknowns(t *testing.T) {
 		}
 	}
 }
+
+func TestQuantityUsesReadableUnits(t *testing.T) {
+	for _, c := range []struct {
+		v    float64
+		unit string
+		want string
+	}{
+		{117964800, "bytes", "112.5 MiB"},
+		{2.5e9, "bits/s", "2.5 Gbit/s"},
+		{512, "bytes", "512 B"},
+		{2528, "descriptors", "2528 descriptors"},
+	} {
+		if got := quantity(c.v, c.unit); got != c.want {
+			t.Errorf("quantity(%v, %q) = %q, want %q", c.v, c.unit, got, c.want)
+		}
+	}
+}
