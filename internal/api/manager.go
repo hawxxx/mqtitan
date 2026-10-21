@@ -271,6 +271,9 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 					// Local engine errors are setup failures (invalid TLS material, payload);
 					// they never contain credentials and tell the operator what to fix.
 					r.test.Error = "load engine failed: " + err.Error()
+				} else if len(r.test.LostWorkers) > 0 {
+					// The lease error names only worker IDs.
+					r.test.Error = err.Error()
 				}
 			}
 			if thresholdErr != nil {
