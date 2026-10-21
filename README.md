@@ -1,5 +1,7 @@
 # MQTTitan
 
+![MQTTitan dashboard during a live run](docs/images/dashboard.png)
+
 MQTTitan is an open-source MQTT load-testing platform for EMQX and standards-compatible brokers, with a Go CLI/controller and a React operations dashboard. This is a working engineering preview, not a certified production release.
 
 ## Quick start
@@ -49,6 +51,58 @@ Use [live load controls](docs/live-controls.md) to adjust client targets and mes
 Open a finished test and click **Run again** to launch a fresh run from its original scenario while preserving the previous results. Credentials are reused server-side, and recorded workers are retained. See [rerunning tests](docs/reruns.md) for legacy runs and worker availability.
 
 See [architecture](docs/architecture/overview.md), [scenario specification](docs/scenario-spec.md), and [roadmap](docs/roadmap.md).
+
+## Feature tour
+
+The screenshots below come from real runs against a local Mosquitto broker: 1,500 MQTT 5 clients publishing correlated JSON telemetry at QoS 1, with 20 wildcard subscribers measuring end-to-end latency.
+
+### Live test control
+
+Every running test streams its metrics over server-sent events. Live load controls change the client target and per-publisher message rate mid-run; each change is persisted before it is applied and listed in the load change history.
+
+![Live test with live load controls](docs/images/live-test.png)
+
+### Latency analysis
+
+Publish latency is recorded in HDR histograms and shown as a P95 timeline, exact percentiles from P50 to P99.9, and a log-scale distribution. Correlated runs also report end-to-end latency from publisher to subscriber.
+
+![Latency tab with percentile strip and histogram](docs/images/latency.png)
+
+### Test wizard
+
+Build a publishing workload without writing YAML: clients, spare capacity for live increases, rate, duration, payload size, QoS, MQTT version, credentials, and TLS certificate profiles for `mqtts://` and `wss://` brokers. The wizard shows the target throughput and approximate wire rate, then opens the generated scenario for review.
+
+![New test wizard](docs/images/wizard.png)
+
+### Scenario lab
+
+Edit versionable YAML scenarios with staged client populations, mixed workloads, payload templates, and thresholds. **Validate & plan** checks the scenario and estimates peak clients, message rate, memory, file descriptors and bandwidth against this host's measured limits. Save scenarios to the library or start them locally or on distributed workers.
+
+![Scenario editor with a validated execution plan](docs/images/scenario-lab.png)
+
+### Compare runs
+
+Put a baseline and a candidate side by side. Changes are colored by direction: lower latency and fewer errors read as improvements, as do more connections and messages.
+
+![Comparison of two runs](docs/images/compare.png)
+
+### Failure analysis
+
+Runs with connection, publish or subscribe errors, failed thresholds, or interrupted execution are collected in one place with their diagnostic message.
+
+![Failure analysis page](docs/images/errors.png)
+
+### Distributed workers
+
+Workers register with the controller, receive a contiguous slice of the client population, and report merged metrics and HDR distributions. The workers page also shows the host readiness checks from `mqtitan doctor`.
+
+![Workers page during a distributed run](docs/images/workers.png)
+
+### Broker profiles
+
+Save broker connections in the browser and pick them in the wizard. When the controller is configured with EMQX management API credentials, the same page shows broker-side connections and message counters.
+
+![Broker profiles](docs/images/brokers.png)
 
 ## Documentation
 
