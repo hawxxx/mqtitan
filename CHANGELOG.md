@@ -17,5 +17,4 @@
 ### Bug Fixes
 
 * guard sample rates and report CLI transport errors ([87e17a6](https://github.com/hawxxx/mqtitan/commit/87e17a6ef0a350888509d30af85677bf382a3253))
-* harden subscribe, reconnect and remote run handling ([121c998](https://github.com/hawxxx/mqtitan/commit/121c99826589c6d76c3d4666175649061e89f323))
 * harden subscribe, reconnect and remote run handling ([3e286a1](https://github.com/hawxxx/mqtitan/commit/3e286a1ab961d33123eba59c080f960e27650658))
