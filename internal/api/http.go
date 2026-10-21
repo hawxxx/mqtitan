@@ -149,6 +149,10 @@ func Handler(m *Manager, opts Options) http.Handler {
 		}
 		ch, unsub, err := m.Subscribe(id)
 		if err != nil {
+			// The run may have finished between Get and Subscribe; report its final state.
+			if t, err = m.Get(id); err == nil {
+				send("status", t)
+			}
 			return
 		}
 		defer unsub()

@@ -258,3 +258,11 @@ func TestPublishTimeoutInterruptsBlockedSocket(t *testing.T) {
 		})
 	}
 }
+
+func TestKeepAliveRoundsUp(t *testing.T) {
+	for d, want := range map[time.Duration]uint16{500 * time.Millisecond: 1, time.Second: 1, 1500 * time.Millisecond: 2, 65535 * time.Second: 65535} {
+		if got := keepAliveSeconds(d); got != want {
+			t.Errorf("keepAliveSeconds(%s) = %d, want %d", d, got, want)
+		}
+	}
+}

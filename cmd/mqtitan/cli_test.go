@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestQuickRejectsWrappedQoS(t *testing.T) {
@@ -20,5 +26,55 @@ func TestRemoteListenRequiresAuthentication(t *testing.T) {
 	}
 	if err := checkListen("127.0.0.1:8080", "", false); err != nil {
 		t.Fatal(err)
+	}
+}
+func TestRequestReportsControllerErrorMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"error":{"code":"INVALID_SCENARIO","message":"clients.count must be positive"}}`))
+	}))
+	defer srv.Close()
+	err := request(context.Background(), srv.URL, "POST", "/api/v1/tests", map[string]string{}, nil)
+	if err == nil || err.Error() != "controller returned HTTP 400: clients.count must be positive" {
+		t.Fatalf("got %v", err)
+	}
+}
+func TestInterruptDuringPollStopsRemoteTest(t *testing.T) {
+	polled := make(chan struct{}, 1)
+	var stopped atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/v1/tests":
+			w.WriteHeader(201)
+			_, _ = w.Write([]byte(`{"data":{"id":"t1","status":"running"}}`))
+		case r.Method == "GET":
+			select {
+			case polled <- struct{}{}:
+			default:
+			}
+			<-r.Context().Done()
+		case r.URL.Path == "/api/v1/tests/t1/stop":
+			stopped.Store(true)
+			w.WriteHeader(202)
+			_, _ = w.Write([]byte(`{"data":{"status":"stopping"}}`))
+		}
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		select {
+		case <-polled:
+		case <-time.After(5 * time.Second):
+		}
+		cancel()
+	}()
+	err := remoteRun(ctx, srv.URL, "scenario", nil)
+	var exit exitError
+	if !errors.As(err, &exit) || exit.code != 130 {
+		t.Fatalf("got %v", err)
+	}
+	if !stopped.Load() {
+		t.Fatal("interrupted run left the remote test running")
 	}
 }
