@@ -36,5 +36,29 @@ func budgetCheck(name string, estimate, capacity float64, unit, recommendation s
 	if estimate >= capacity {
 		status, rec = "WARN", recommendation
 	}
-	return Check{name, fmt.Sprintf("estimate %.0f / measured ceiling %.0f %s", estimate, capacity, unit), status, rec}
+	return Check{name, fmt.Sprintf("estimate %s / measured ceiling %s", quantity(estimate, unit), quantity(capacity, unit)), status, rec}
+}
+
+// quantity renders byte and bit-rate budgets with binary or decimal prefixes;
+// other units stay exact counts.
+func quantity(v float64, unit string) string {
+	prefixes := []string{"", "Ki", "Mi", "Gi", "Ti"}
+	base := 1024.0
+	switch unit {
+	case "bytes":
+		unit = "B"
+	case "bits/s":
+		prefixes, base, unit = []string{"", "k", "M", "G", "T"}, 1000, "bit/s"
+	default:
+		return fmt.Sprintf("%.0f %s", v, unit)
+	}
+	i := 0
+	for v >= base && i < len(prefixes)-1 {
+		v /= base
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%.0f %s", v, unit)
+	}
+	return fmt.Sprintf("%.1f %s%s", v, prefixes[i], unit)
 }
