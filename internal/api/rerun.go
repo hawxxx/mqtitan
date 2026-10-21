@@ -26,7 +26,7 @@ func (m *Manager) Rerun(id string) (Test, error) {
 	default:
 		return Test{}, ErrRunNotFinished
 	}
-	return m.startTest(previous.Scenario, previous.WorkerIDs, previous.ID)
+	return m.startTest(previous.Scenario, previous.WorkerIDs, previous.ID, decodeScenario)
 }
 
 func (m *Manager) rerunRoutes(mux *http.ServeMux) {

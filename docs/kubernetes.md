@@ -14,7 +14,7 @@ docker push registry.example.com/team/mqtitan:docs-demo
 kubectl create namespace mqtitan
 ```
 
-Provision a Secret named `mqtitan-auth` in that namespace with a `token` key through your secret-management workflow. For a local administrative shell with an already supplied `MQTITAN_TOKEN`:
+Provision a Secret named `mqtitan-auth` in that namespace with a `token` key through your secret-management workflow. Add a second key, for example `worker-token`, and set `auth.workerKey=worker-token` so worker pods receive only a worker credential instead of the administrative token. For a local administrative shell with an already supplied `MQTITAN_TOKEN`:
 
 ```sh
 kubectl -n mqtitan create secret generic mqtitan-auth \

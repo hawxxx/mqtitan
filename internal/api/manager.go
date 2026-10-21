@@ -114,7 +114,21 @@ func ID() string {
 	}
 	return hex.EncodeToString(b)
 }
+// decodeScenario validates a scenario received through the API. TLS file
+// paths are refused there: they would make the controller read, and present
+// to a caller-chosen broker, files from its own filesystem. Use certificate
+// profiles or inline PEM instead.
 func decodeScenario(raw string) (scenario.Scenario, error) {
+	s, err := decodeLocalScenario(raw)
+	if err == nil && (s.Broker.TLS.CAFile != "" || s.Broker.TLS.CertFile != "" || s.Broker.TLS.KeyFile != "") {
+		err = errors.New("TLS caFile, certFile and keyFile are only accepted by standalone CLI runs; use a certificate profile or inline PEM")
+	}
+	return s, err
+}
+
+// decodeLocalScenario validates a scenario supplied by the local CLI user,
+// who may reference TLS files they can read.
+func decodeLocalScenario(raw string) (scenario.Scenario, error) {
 	s, err := scenario.Parse([]byte(raw))
 	if err != nil {
 		return s, err
@@ -133,10 +147,16 @@ func (m *Manager) persist(t Test) error {
 
 func (m *Manager) Start(raw string) (Test, error) { return m.StartOnWorkers(raw, nil) }
 func (m *Manager) StartOnWorkers(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, "")
+	return m.startTest(raw, workerIDs, "", decodeScenario)
 }
-func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string) (Test, error) {
-	s, err := decodeScenario(raw)
+
+// StartLocal starts a scenario supplied by the CLI user who owns this
+// in-process controller; unlike API submissions it may use TLS file paths.
+func (m *Manager) StartLocal(raw string, workerIDs []string) (Test, error) {
+	return m.startTest(raw, workerIDs, "", decodeLocalScenario)
+}
+func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string, decode func(string) (scenario.Scenario, error)) (Test, error) {
+	s, err := decode(raw)
 	if err != nil {
 		return Test{}, err
 	}
