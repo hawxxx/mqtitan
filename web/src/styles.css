@@ -1984,3 +1984,89 @@ textarea:focus {
     animation: none !important;
   }
 }
+/* Chart hover readout rendered by uPlot's live legend. */
+.chart-body .u-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  width: auto;
+  margin: 10px 0 0 4px;
+  color: var(--muted);
+  font: 12px "IBM Plex Mono", monospace;
+  text-align: left;
+}
+.chart-body .u-legend tbody {
+  display: contents;
+}
+.chart-body .u-legend tr {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.chart-body .u-legend th,
+.chart-body .u-legend td {
+  padding: 0;
+  border: 0;
+  height: auto;
+  background: none;
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  vertical-align: middle;
+}
+.chart-body .u-legend tr:hover {
+  background: none;
+}
+.chart-body .u-legend th {
+  font-weight: 500;
+}
+.chart-body .u-legend th > * {
+  display: inline-block;
+  vertical-align: middle;
+}
+.chart-body .u-legend .u-marker {
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+}
+.chart-body .u-legend .u-value {
+  color: var(--text);
+}
+.chart-body .u-legend .u-marker {
+  border-radius: 2px;
+}
+.chart-body .u-select {
+  background: rgba(57, 199, 176, 0.12);
+}
+.delta.better {
+  color: #7dd7b2;
+}
+.delta.worse {
+  color: #f29b91;
+}
+[data-theme="light"] .delta.better {
+  color: #16836e;
+}
+[data-theme="light"] .delta.worse {
+  color: #b34d3e;
+}
+.form-grid .span-2 {
+  grid-column: 1 / -1;
+}
+/* Let the YAML editor fill its column when the side panels grow taller. */
+.editor-layout > .editor {
+  display: flex;
+  flex-direction: column;
+}
+.editor-layout > .editor textarea {
+  flex: 1;
+}
+.compare-when {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.75;
+}

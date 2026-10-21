@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makeScenario, latency, request } from "./model";
+import { bytes, elapsed, makeScenario, latency, request } from "./model";
 import { parse } from "yaml";
 describe("scenario wizard", () => {
   it("allows spare client capacity for later live increases", () => {
@@ -93,5 +93,23 @@ describe("scenario wizard", () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+describe("formatters", () => {
+  it("chooses readable latency units", () => {
+    expect(latency(80_000)).toBe("80 µs");
+    expect(latency(0)).toBe("0.00 ms");
+    expect(latency(2_500_000_000)).toBe("2.50 s");
+    expect(latency(-2_000_000)).toBe("-2.00 ms");
+  });
+  it("formats gigabytes and elapsed time", () => {
+    expect(bytes(3 * 1073741824)).toBe("3.00 GB");
+    expect(elapsed(65)).toBe("1:05");
+    expect(elapsed(3725)).toBe("1:02:05");
+  });
+  it("uses the requested payload size and explains invalid capacity", () => {
+    const base = { name: "x", broker: "mqtt://b:1883", clients: 10, rate: 1, duration: 5, qos: 0 };
+    expect(makeScenario({ ...base, payloadSize: 1024 })).toContain("size: 1024");
+    expect(() => makeScenario({ ...base, capacity: 5 })).toThrow(/Maximum clients/);
   });
 });
