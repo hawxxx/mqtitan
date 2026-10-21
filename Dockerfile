@@ -10,7 +10,7 @@ COPY web/ ./
 RUN npm run build
 
 # Cross-compile on the build host; no QEMU needed for arm64.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:8ac98ca534ac3f51e1f420a1dd2c15e74c75cfa0f23f3ad27eb5d7236c349a0c AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
