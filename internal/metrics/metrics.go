@@ -123,11 +123,28 @@ func (c *Counters) recordCorrected(shard int, kind byte, d, expected time.Durati
 		*h = histogram()
 	}
 	v := min(maxLatency, max(1, d.Microseconds()))
-	if interval := expected.Microseconds(); interval > 0 {
-		_ = (*h).RecordCorrectedValue(v, interval)
-		return
-	}
 	_ = (*h).RecordValue(v)
+	if interval := expected.Microseconds(); interval > 0 && v >= 2*interval {
+		backfill(*h, v, interval)
+	}
+}
+
+// backfill adds the samples that slots queued behind a v-long operation
+// would have observed: v-interval, v-2*interval, ... down to interval, as
+// HdrHistogram's RecordCorrectedValue does. That loop runs once per missing
+// sample, which a long stall at a microsecond period turns into millions of
+// iterations under the shard lock, so the ramp is recorded in at most 256
+// evenly spaced steps with the same total count.
+func backfill(h *hdr.Histogram, v, interval int64) {
+	n := v/interval - 1
+	steps := min(n, 256)
+	for k := range steps {
+		// Step k covers missing samples [k*n/steps, (k+1)*n/steps).
+		from, to := k*n/steps, (k+1)*n/steps
+		// Missing sample j is v-(j+1)*interval; record the step at its mean.
+		value := v - (from+to+1)*interval/2
+		_ = h.RecordValues(max(1, min(maxLatency, value)), to-from)
+	}
 }
 func (c *Counters) RecordPublishLatency(d time.Duration) {
 	c.RecordPublishLatencyFor(int(c.nextShard.Add(1)), d)

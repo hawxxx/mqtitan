@@ -91,3 +91,28 @@ func TestTimeoutIsItsOwnErrorCategory(t *testing.T) {
 		t.Fatalf("errors = %v", e)
 	}
 }
+
+func TestBackfillMatchesExactCorrectionAndIsBounded(t *testing.T) {
+	exact, bounded := histogram(), histogram()
+	_ = exact.RecordCorrectedValue(1_000_000, 10_000) // 1s stall, 10ms period
+	_ = bounded.RecordValue(1_000_000)
+	backfill(bounded, 1_000_000, 10_000)
+	if exact.TotalCount() != bounded.TotalCount() {
+		t.Fatalf("count = %d, want %d", bounded.TotalCount(), exact.TotalCount())
+	}
+	for _, q := range []float64{50, 90, 99} {
+		e, b := exact.ValueAtQuantile(q), bounded.ValueAtQuantile(q)
+		if diff := float64(b-e) / float64(e); diff > 0.01 || diff < -0.01 {
+			t.Fatalf("p%v = %d, exact %d", q, b, e)
+		}
+	}
+}
+
+func BenchmarkCorrectedWorstCase(b *testing.B) {
+	m := New()
+	b.ReportAllocs()
+	for b.Loop() {
+		// 10s stall at a 1µs period: ten million missing slots.
+		m.RecordPublishLatencyCorrected(1, 10*time.Second, time.Microsecond)
+	}
+}
