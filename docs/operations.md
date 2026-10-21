@@ -4,7 +4,7 @@ For step-by-step setup and a first test, use [Docker and Compose](docker.md) or 
 
 ## Local quickstart
 
-Build the CLI with Go 1.25 and the UI with Node 22:
+Build the CLI with Go 1.26 and the UI with Node 22:
 
 ```sh
 make build

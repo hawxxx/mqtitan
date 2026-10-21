@@ -43,6 +43,15 @@ func request(ctx context.Context, controller, method, path string, body any, out
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
+		// The controller's error messages are written for clients; show them instead of a bare status.
+		var failure struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&failure) == nil && failure.Error.Message != "" {
+			return fmt.Errorf("controller returned HTTP %d: %s", resp.StatusCode, failure.Error.Message)
+		}
 		return fmt.Errorf("controller returned HTTP %d", resp.StatusCode)
 	}
 	if writer, ok := out.(io.Writer); ok {
@@ -72,7 +81,9 @@ func remoteCommand(command string, args []string) error {
 	if err := f.Parse(args); err != nil {
 		return err
 	}
-	if f.NArg() != 0 {
+	if id == "" && f.NArg() == 1 {
+		id = f.Arg(0)
+	} else if f.NArg() != 0 {
 		return errors.New("unexpected arguments")
 	}
 	path := "/api/v1/tests"
@@ -107,19 +118,37 @@ func remoteRun(ctx context.Context, controller, raw string, workers []string) er
 		return err
 	}
 	fmt.Printf("Test %s\nDashboard: %s\n", t.ID, controller)
+	interrupt := func() error {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := request(stopCtx, controller, "POST", "/api/v1/tests/"+url.PathEscape(t.ID)+"/stop", nil, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not stop test %s: %v\n", t.ID, err)
+		}
+		return exitError{130, "test interrupted"}
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
+	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
-			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_ = request(stopCtx, controller, "POST", "/api/v1/tests/"+t.ID+"/stop", nil, nil)
-			return exitError{130, "test interrupted"}
+			return interrupt()
 		case <-ticker.C:
-			if err := request(ctx, controller, "GET", "/api/v1/tests/"+t.ID, nil, &t); err != nil {
-				return err
+			var next api.Test
+			if err := request(ctx, controller, "GET", "/api/v1/tests/"+url.PathEscape(t.ID), nil, &next); err != nil {
+				// An interrupt cancels the in-flight poll; still stop the remote test.
+				if ctx.Err() != nil {
+					return interrupt()
+				}
+				// Tolerate brief controller hiccups rather than abandoning a running test.
+				if failures++; failures >= 5 {
+					return fmt.Errorf("lost contact with controller; test %s may still be running: %w", t.ID, err)
+				}
+				fmt.Fprintf(os.Stderr, "warning: %v; retrying\n", err)
+				continue
 			}
+			failures = 0
+			t = next
 			fmt.Printf("connected=%d total=%d p95=%s\n", t.Snapshot.Connected, t.Snapshot.Published, t.Snapshot.P95)
 			if t.Status != "running" {
 				return verdict(t)

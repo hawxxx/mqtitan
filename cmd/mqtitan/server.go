@@ -141,17 +141,22 @@ func serve(args []string) error {
 	}
 }
 func runScenario(args []string) error {
-	if len(args) == 0 {
-		return errors.New("usage: mqtitan run SCENARIO [flags]")
+	path := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		path, args = args[0], args[1:]
 	}
-	path := args[0]
 	f := flag.NewFlagSet("run", flag.ContinueOnError)
 	opts := runFlags(f)
-	if err := f.Parse(args[1:]); err != nil {
+	if err := f.Parse(args); err != nil {
 		return err
 	}
-	if f.NArg() != 0 {
+	if path == "" && f.NArg() == 1 {
+		path = f.Arg(0)
+	} else if f.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	if path == "" {
+		return errors.New("usage: mqtitan run SCENARIO [flags]")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -170,10 +175,7 @@ func executeScenario(raw string, o runOptions) error {
 	printPlan(s)
 	ctx, cancel := signalContext()
 	defer cancel()
-	ids := []string(nil)
-	if o.Workers != "" {
-		ids = strings.Split(o.Workers, ",")
-	}
+	ids := splitWorkers(o.Workers)
 	if o.Controller != "" {
 		return remoteRun(ctx, o.Controller, raw, ids)
 	}
@@ -210,6 +212,17 @@ func executeScenario(raw string, o runOptions) error {
 			}
 		}
 	}
+}
+
+// splitWorkers accepts "a,b", "a, b" and trailing commas.
+func splitWorkers(v string) []string {
+	var ids []string
+	for _, id := range strings.Split(v, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 func verdict(t api.Test) error {
 	fmt.Printf("RESULT %s  peak=%d messages=%d p99=%s\n", strings.ToUpper(t.Status), t.Snapshot.PeakConnected, t.Snapshot.Published, t.Snapshot.P99)

@@ -154,11 +154,23 @@ func (e *Engine) runClient(ctx context.Context, seq int) {
 		maximum = 30 * time.Second
 	}
 	maximum = max(backoff, maximum)
-	for attempt := 0; ; attempt++ {
-		e.runSession(ctx, seq, attempt > 0, g)
-		if ctx.Err() != nil || !r.Enabled || attempt >= attempts {
+	initial := backoff
+	retries := 0
+	for session := 0; ; session++ {
+		up := e.runSession(ctx, seq, session > 0, g)
+		if ctx.Err() != nil || !r.Enabled {
 			return
 		}
+		// A session that stayed connected for at least maxBackoff ends an outage;
+		// the next loss gets a fresh retry budget instead of inheriting old retries.
+		if up >= maximum {
+			retries = 0
+			backoff = initial
+		}
+		if retries >= attempts {
+			return
+		}
+		retries++
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -180,7 +192,9 @@ func (e *Engine) generator(seq int) (*payload.Generator, error) {
 	value := strings.ReplaceAll(scenario.Expand(w.Payload.Value, globalSeq, id), "${worker}", e.Scenario.Clients.Worker)
 	return payload.New(payload.Spec{Type: w.Payload.Type, Value: value, Size: w.Payload.Size}, payload.Variables{ClientID: id, Worker: e.Scenario.Clients.Worker, Sequence: globalSeq, Seed: e.Scenario.Seed})
 }
-func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *payload.Generator) {
+
+// runSession returns how long the session stayed connected; zero when connecting failed.
+func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *payload.Generator) (up time.Duration) {
 	w := e.workload(seq)
 	globalSeq := seq + e.Scenario.Clients.SequenceOffset
 	expand := func(template, clientID string) string {
@@ -212,16 +226,20 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 		e.Metrics.RecordError("connect")
 		return
 	}
-	e.Metrics.RecordConnectionLatencyFor(seq, time.Since(connectStarted))
+	connectedAt := time.Now()
+	e.Metrics.RecordConnectionLatencyFor(seq, connectedAt.Sub(connectStarted))
 	if reconnecting {
 		e.Metrics.Reconnects.Add(1)
 	}
 	e.Metrics.ClientConnected()
+	// A session ended by a recorded subscribe failure is not an unexpected disconnect.
+	failed := false
 	defer func() {
+		up = time.Since(connectedAt)
 		c.Close()
 		e.Metrics.Connected.Add(-1)
 		e.Metrics.Disconnects.Add(1)
-		if ctx.Err() == nil {
+		if ctx.Err() == nil && !failed {
 			e.Metrics.RecordError("disconnect")
 		}
 	}()
@@ -235,6 +253,7 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 			}
 			e.Metrics.SubscribeErrors.Add(1)
 			e.Metrics.RecordError("subscribe")
+			failed = true
 			return
 		}
 		e.Metrics.Subscriptions.Add(1)
@@ -304,9 +323,6 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 			}
 			e.Metrics.PublishErrors.Add(1)
 			e.Metrics.RecordError("publish")
-			if ctx.Err() != nil {
-				return
-			}
 			continue
 		}
 		e.Metrics.Published.Add(1)

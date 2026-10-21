@@ -10,6 +10,7 @@ import (
 	broker "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/listeners"
+	"github.com/mochi-mqtt/server/v2/packets"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	transport "github.com/mqtitan/mqtitan/internal/mqtt"
 	"github.com/mqtitan/mqtitan/internal/scenario"
@@ -354,4 +355,93 @@ func TestIntentionalShutdownDoesNotCountAsPublishFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+type denySubscribeHook struct{ broker.HookBase }
+
+func (h *denySubscribeHook) ID() string { return "deny-subscribe" }
+func (h *denySubscribeHook) Provides(b byte) bool {
+	return b == broker.OnConnectAuthenticate || b == broker.OnACLCheck
+}
+func (h *denySubscribeHook) OnConnectAuthenticate(*broker.Client, packets.Packet) bool { return true }
+func (h *denySubscribeHook) OnACLCheck(_ *broker.Client, topic string, write bool) bool {
+	return write || topic != "denied"
+}
+
+func TestRejectedSubscriptionIsCountedOnce(t *testing.T) {
+	for _, v := range []string{"3.1.1", "5"} {
+		t.Run(v, func(t *testing.T) {
+			b := broker.New(&broker.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+			if err := b.AddHook(new(denySubscribeHook), nil); err != nil {
+				t.Fatal(err)
+			}
+			l := listeners.NewTCP(listeners.Config{ID: "deny", Address: "127.0.0.1:0"})
+			if err := b.AddListener(l); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.Serve(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = b.Close() })
+			s := baseScenario("mqtt://"+l.Address(), v)
+			s.Clients.Count = 1
+			s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 150 * time.Millisecond}, TargetClients: 1}}
+			s.Workloads = []scenario.Workload{{Type: "subscriber", Clients: 1, Topic: "denied", QoS: 1}}
+			m := metrics.New()
+			e := Engine{Scenario: s, Metrics: m}
+			if err := e.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got := m.Snapshot()
+			if got.SubscribeErrors != 1 || got.Subscriptions != 0 || got.Errors["subscribe"] != 1 || got.Errors["disconnect"] != 0 {
+				t.Fatalf("rejected subscription miscounted %+v", got)
+			}
+		})
+	}
+}
+
+func TestStableSessionRestoresReconnectBudget(t *testing.T) {
+	b := broker.New(&broker.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	_ = b.AddHook(new(auth.AllowHook), nil)
+	l := listeners.NewTCP(listeners.Config{ID: "tcp", Address: "127.0.0.1:0"})
+	if err := b.AddListener(l); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.Serve()
+	defer b.Close()
+	s := baseScenario("mqtt://"+l.Address(), "5")
+	s.Clients.Count = 1
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: time.Hour}, TargetClients: 1}}
+	s.Broker.Reconnect = scenario.Reconnect{Enabled: true, MaxAttempts: 1, InitialBackoff: scenario.Duration{Duration: 5 * time.Millisecond}, MaxBackoff: scenario.Duration{Duration: 10 * time.Millisecond}}
+	m := metrics.New()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	e := Engine{Scenario: s, Metrics: m}
+	go func() { done <- e.Run(ctx) }()
+	for outage := 1; outage <= 3; outage++ {
+		for m.Connected.Load() != 1 || m.Reconnects.Load() != uint64(outage-1) {
+			select {
+			case <-ctx.Done():
+				t.Fatalf("client not restored before outage %d: %+v", outage, m.Snapshot())
+			case <-time.After(time.Millisecond):
+			}
+		}
+		time.Sleep(30 * time.Millisecond) // longer than maxBackoff, so the session counts as stable
+		cl, ok := b.Clients.Get("wire-1")
+		if !ok {
+			t.Fatal("broker lacks client")
+		}
+		_ = cl.Net.Conn.Close()
+	}
+	for m.Reconnects.Load() < 3 {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("budget not restored after stable sessions: %+v", m.Snapshot())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
 }

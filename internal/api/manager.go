@@ -237,6 +237,11 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			}
 			if err != nil && !errors.Is(err, context.Canceled) {
 				r.test.Error = "load engine failed; inspect aggregate errors"
+				if len(r.workerIDs) == 0 {
+					// Local engine errors are setup failures (invalid TLS material, payload);
+					// they never contain credentials and tell the operator what to fix.
+					r.test.Error = "load engine failed: " + err.Error()
+				}
 			}
 			if thresholdErr != nil {
 				r.test.Error = thresholdErr.Error()
@@ -299,11 +304,13 @@ func (m *Manager) List() ([]Test, error) {
 		if err = json.Unmarshal(r, &t); err != nil {
 			return nil, err
 		}
-		current, err := m.Get(t.ID)
-		if err != nil {
-			return nil, err
+		// Live runs carry fresher in-memory state; stored records need no second read.
+		m.mu.Lock()
+		if run := m.runs[t.ID]; run != nil {
+			t = m.withLoadStatus(run)
 		}
-		out = append(out, current)
+		m.mu.Unlock()
+		out = append(out, publicTest(t))
 	}
 	return out, nil
 }

@@ -2,7 +2,7 @@
 
 Keep changes focused, distinguish implemented behavior from roadmap goals, and provide evidence for performance/reliability claims.
 
-Install Go 1.25, Node.js 22, npm, and Make. From the repository root:
+Install Go 1.26, Node.js 22, npm, and Make. From the repository root:
 
 ```sh
 make build

@@ -192,7 +192,7 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	c := &client3{done: make(chan struct{})}
 	o := v3.NewClientOptions().AddBroker(b.URL).SetClientID(id).SetProtocolVersion(4).SetCleanSession(b.CleanStart).SetAutoReconnect(false).SetConnectRetry(false).SetConnectTimeout(time.Until(deadline(ctx))).SetWriteTimeout(10 * time.Second).SetTLSConfig(cfg).SetOrderMatters(true)
 	if b.KeepAlive.Duration > 0 {
-		o.SetKeepAlive(b.KeepAlive.Duration)
+		o.SetKeepAlive(time.Duration(keepAliveSeconds(b.KeepAlive.Duration)) * time.Second)
 	}
 	o.SetUsername(b.Username).SetPassword(b.Password)
 	o.SetDefaultPublishHandler(func(_ v3.Client, m v3.Message) { receive(m.Payload()) })
@@ -233,6 +233,11 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	}
 	return c, nil
 }
+
+// keepAliveSeconds rounds up, so a sub-second keepAlive never becomes 0 (disabled).
+func keepAliveSeconds(d time.Duration) uint16 {
+	return uint16(min(65535, (d+time.Second-1)/time.Second))
+}
 func deadline(ctx context.Context) time.Time { d, _ := ctx.Deadline(); return d }
 func (c *client3) closeConn() {
 	c.mu.Lock()
@@ -261,7 +266,17 @@ func (c *client3) Publish(ctx context.Context, topic string, qos byte, retain bo
 func (c *client3) Subscribe(ctx context.Context, topic string, qos byte) error {
 	stop := context.AfterFunc(ctx, c.closeConn)
 	defer stop()
-	return wait(ctx, c.c.Subscribe(topic, qos, nil))
+	token := c.c.Subscribe(topic, qos, nil)
+	if err := wait(ctx, token); err != nil {
+		return err
+	}
+	// MQTT 3.1.1 reports a refused filter with return code 0x80, not a token error.
+	if st, ok := token.(*v3.SubscribeToken); ok {
+		if code, found := st.Result()[topic]; found && code >= 0x80 {
+			return fmt.Errorf("SUBACK reason %d", code)
+		}
+	}
+	return nil
 }
 
 type client5 struct {
@@ -280,7 +295,7 @@ func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	c := paho.NewClient(paho.ClientConfig{Conn: conn, ClientID: id, PacketTimeout: 10 * time.Second, OnPublishReceived: []func(paho.PublishReceived) (bool, error){func(p paho.PublishReceived) (bool, error) { receive(p.Packet.Payload); return true, nil }}})
 	keep := uint16(30)
 	if b.KeepAlive.Duration > 0 {
-		keep = uint16(b.KeepAlive.Duration / time.Second)
+		keep = keepAliveSeconds(b.KeepAlive.Duration)
 	}
 	ack, err := c.Connect(ctx, &paho.Connect{ClientID: id, CleanStart: b.CleanStart, KeepAlive: keep, Username: b.Username, Password: []byte(b.Password), UsernameFlag: b.Username != "", PasswordFlag: b.Password != ""})
 	if err != nil {

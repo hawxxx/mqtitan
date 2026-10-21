@@ -157,3 +157,33 @@ func TestRestartMarksRunInterrupted(t *testing.T) {
 	}
 	_ = context.Background()
 }
+
+func TestLocalEngineSetupErrorIsReported(t *testing.T) {
+	m, _ := setup(t)
+	raw := strings.Replace(testScenario, "url: mqtt://127.0.0.1:1", "url: mqtts://127.0.0.1:1\n  tls:\n    caFile: "+filepath.Join(t.TempDir(), "missing-ca.pem"), 1)
+	started, err := m.Start(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, err := m.Get(started.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Status != "running" {
+			if got.Status != "failed" || got.Error != "load engine failed: TLS CA file cannot be read" {
+				t.Fatalf("setup failure hidden: %s %q", got.Status, got.Error)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("run did not finish")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	list, err := m.List()
+	if err != nil || len(list) != 1 || list[0].ID != started.ID || strings.Contains(list[0].Scenario, "private-password") {
+		t.Fatalf("list %+v %v", list, err)
+	}
+}
