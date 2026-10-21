@@ -4,16 +4,13 @@ export default defineConfig({
   plugins: [react()],
   server: { proxy: { "/api": "http://localhost:8080" } },
   build: {
-    rollupOptions: {
+    rolldownOptions: {
       output: {
-        manualChunks: {
-          tanstack: [
-            "@tanstack/react-router",
-            "@tanstack/react-query",
-            "@tanstack/react-table",
-            "@tanstack/react-virtual",
+        codeSplitting: {
+          groups: [
+            { name: "tanstack", test: /node_modules[\\/]@tanstack[\\/]/ },
+            { name: "charts", test: /node_modules[\\/]uplot[\\/]/ },
           ],
-          charts: ["uplot"],
         },
       },
     },
