@@ -59,6 +59,6 @@ One scenario currently uses one broker URL. A DNS name managed in Route 53 can p
 
 ## Thresholds and latency interpretation
 
-Supported thresholds are `connection_error_rate`, `message_error_rate` (alias for publish errors), `publish_error_rate`, and `publish_latency_p50`, `publish_latency_p95`, `publish_latency_p99`. Comparisons support `<`, `<=`, `>`, and `>=`. Use percentages for error rates and durations for latency. Missing measurements fail a configured threshold rather than producing a false pass.
+Supported thresholds are `connection_error_rate`, `message_error_rate` (alias for publish errors), `publish_error_rate`, `subscribe_error_rate`, `publish_latency_p50`, `publish_latency_p95`, `publish_latency_p99`, `connect_latency_p50`, `connect_latency_p95`, `connect_latency_p99`, and `end_to_end_latency_p50`, `end_to_end_latency_p95`, `end_to_end_latency_p99`. End-to-end thresholds require `correlate: true` on a publisher with matching subscribers; connect thresholds require at least one successful connection. Comparisons support `<`, `<=`, `>`, and `>=`. Use percentages for error rates and durations for latency. Missing measurements fail a configured threshold rather than producing a false pass.
 
 Publish latency is not automatically delivery latency: QoS 0 does not acknowledge delivery, and QoS 1/2 measurements cover the publish operation's acknowledgement path. Use matching subscribers and correlation for end-to-end measurements.

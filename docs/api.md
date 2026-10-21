@@ -13,7 +13,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | POST | `/api/v1/tests/{id}/load` | Apply [live controls](live-controls.md) |
 | GET | `/api/v1/tests/{id}/metrics` | Aggregate history |
 | GET | `/api/v1/tests/{id}/stream` | Live SSE |
-| GET | `/api/v1/tests/{id}/export?format=json` | JSON report; `format=csv` also supported |
+| GET | `/api/v1/tests/{id}/export?format=json` | JSON report; `format=csv` also supported (columns: timestamp, connected, published, messages_per_second, bytes_per_second, p50_ms, p95_ms, p99_ms, connection_errors, publish_errors, received, end_to_end_p95_ms, subscribe_errors) |
 | POST / GET | `/api/v1/scenarios` | Save / list scenarios |
 | POST | `/api/v1/plan` | Validate and estimate a scenario |
 | GET | `/api/v1/doctor` | Controller-host diagnostics |

@@ -81,7 +81,9 @@ func remoteCommand(command string, args []string) error {
 	if err := f.Parse(args); err != nil {
 		return err
 	}
-	if f.NArg() != 0 {
+	if id == "" && f.NArg() == 1 {
+		id = f.Arg(0)
+	} else if f.NArg() != 0 {
 		return errors.New("unexpected arguments")
 	}
 	path := "/api/v1/tests"

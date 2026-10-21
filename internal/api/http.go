@@ -251,9 +251,9 @@ func Handler(m *Manager, opts Options) http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/csv")
 		c := csv.NewWriter(w)
-		_ = c.Write([]string{"timestamp", "connected", "published", "messages_per_second", "bytes_per_second", "p50_ms", "p95_ms", "p99_ms", "connection_errors", "publish_errors"})
+		_ = c.Write([]string{"timestamp", "connected", "published", "messages_per_second", "bytes_per_second", "p50_ms", "p95_ms", "p99_ms", "connection_errors", "publish_errors", "received", "end_to_end_p95_ms", "subscribe_errors"})
 		for _, s := range samples {
-			_ = c.Write([]string{s.Timestamp.Format(time.RFC3339Nano), strconv.FormatInt(s.Snapshot.Connected, 10), strconv.FormatUint(s.Snapshot.Published, 10), fmt.Sprint(s.MessageRate), fmt.Sprint(s.ByteRate), fmt.Sprint(float64(s.Snapshot.P50) / 1e6), fmt.Sprint(float64(s.Snapshot.P95) / 1e6), fmt.Sprint(float64(s.Snapshot.P99) / 1e6), fmt.Sprint(s.Snapshot.ConnectErrors), fmt.Sprint(s.Snapshot.PublishErrors)})
+			_ = c.Write([]string{s.Timestamp.Format(time.RFC3339Nano), strconv.FormatInt(s.Snapshot.Connected, 10), strconv.FormatUint(s.Snapshot.Published, 10), fmt.Sprint(s.MessageRate), fmt.Sprint(s.ByteRate), fmt.Sprint(float64(s.Snapshot.P50) / 1e6), fmt.Sprint(float64(s.Snapshot.P95) / 1e6), fmt.Sprint(float64(s.Snapshot.P99) / 1e6), fmt.Sprint(s.Snapshot.ConnectErrors), fmt.Sprint(s.Snapshot.PublishErrors), strconv.FormatUint(s.Snapshot.Received, 10), fmt.Sprint(float64(s.Snapshot.EndToEndP95) / 1e6), strconv.FormatUint(s.Snapshot.SubscribeErrors, 10)})
 		}
 		c.Flush()
 	})

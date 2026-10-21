@@ -36,3 +36,28 @@ func TestNoObservationsCannotPass(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectEndToEndAndSubscribeThresholds(t *testing.T) {
+	input := map[string]string{"connect_latency_p95": "<100ms", "end_to_end_latency_p99": "<20ms", "subscribe_error_rate": "<=1%"}
+	s := metrics.Snapshot{PeakConnected: 5, ConnectP95: 40 * time.Millisecond, CorrelationSamples: 10, EndToEndP99: 25 * time.Millisecond, Subscriptions: 99, SubscribeErrors: 1}
+	results, err := Evaluate(input, s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sorted: connect_latency_p95, end_to_end_latency_p99, subscribe_error_rate.
+	if len(results) != 3 || !results[0].Passed || results[1].Passed || !results[2].Passed {
+		t.Fatalf("wrong verdicts: %+v", results)
+	}
+	empty, err := Evaluate(input, metrics.Snapshot{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range empty {
+		if r.Passed || r.Observed != "no observations" {
+			t.Fatalf("missing measurement passed: %+v", r)
+		}
+	}
+	if err := Validate(map[string]string{"connect_latency_p95": "<5%"}); err == nil {
+		t.Fatal("latency threshold accepted a percentage")
+	}
+}

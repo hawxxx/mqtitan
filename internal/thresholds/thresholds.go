@@ -28,8 +28,10 @@ var pattern = regexp.MustCompile(`^(<=|>=|<|>)([0-9]+(?:\.[0-9]+)?)(%|ns|us|µs|
 func parse(name, text string) (expression, error) {
 	latency := false
 	switch name {
-	case "connection_error_rate", "message_error_rate", "publish_error_rate":
-	case "publish_latency_p50", "publish_latency_p95", "publish_latency_p99":
+	case "connection_error_rate", "message_error_rate", "publish_error_rate", "subscribe_error_rate":
+	case "publish_latency_p50", "publish_latency_p95", "publish_latency_p99",
+		"connect_latency_p50", "connect_latency_p95", "connect_latency_p99",
+		"end_to_end_latency_p50", "end_to_end_latency_p95", "end_to_end_latency_p99":
 		latency = true
 	default:
 		return expression{}, fmt.Errorf("unknown threshold metric %q", name)
@@ -95,6 +97,24 @@ func Evaluate(input map[string]string, s metrics.Snapshot) ([]Result, error) {
 			if valid {
 				value = float64(s.PublishErrors) / float64(attempts)
 			}
+		case "subscribe_error_rate":
+			attempts := s.Subscriptions + s.SubscribeErrors
+			valid = attempts > 0
+			if valid {
+				value = float64(s.SubscribeErrors) / float64(attempts)
+			}
+		case "connect_latency_p50":
+			value, valid = float64(s.ConnectP50), s.PeakConnected > 0
+		case "connect_latency_p95":
+			value, valid = float64(s.ConnectP95), s.PeakConnected > 0
+		case "connect_latency_p99":
+			value, valid = float64(s.ConnectP99), s.PeakConnected > 0
+		case "end_to_end_latency_p50":
+			value, valid = float64(s.EndToEndP50), s.CorrelationSamples > 0
+		case "end_to_end_latency_p95":
+			value, valid = float64(s.EndToEndP95), s.CorrelationSamples > 0
+		case "end_to_end_latency_p99":
+			value, valid = float64(s.EndToEndP99), s.CorrelationSamples > 0
 		case "publish_latency_p50":
 			value = float64(s.P50)
 			valid = s.Published > 0

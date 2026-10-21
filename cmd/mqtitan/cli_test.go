@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +28,23 @@ func TestRemoteListenRequiresAuthentication(t *testing.T) {
 	}
 	if err := checkListen("127.0.0.1:8080", "", false); err != nil {
 		t.Fatal(err)
+	}
+}
+func TestSplitWorkersTrimsSpacesAndEmptyEntries(t *testing.T) {
+	if got := splitWorkers(" worker-a, worker-b ,,"); !reflect.DeepEqual(got, []string{"worker-a", "worker-b"}) {
+		t.Fatalf("got %q", got)
+	}
+	if got := splitWorkers(""); got != nil {
+		t.Fatalf("got %q", got)
+	}
+}
+func TestRunAcceptsFlagsBeforeScenario(t *testing.T) {
+	err := runScenario([]string{"--controller", "http://127.0.0.1:1", "missing.yaml"})
+	if err == nil || !strings.Contains(err.Error(), "missing.yaml") {
+		t.Fatalf("scenario path not taken after flags: %v", err)
+	}
+	if err := runScenario(nil); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("missing usage: %v", err)
 	}
 }
 func TestRequestReportsControllerErrorMessage(t *testing.T) {

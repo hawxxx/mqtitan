@@ -45,7 +45,7 @@ Without `--controller`, `quick` and `run` own a local controller, defaulting to 
 
 Set `MQTITAN_CONTROLLER=http://127.0.0.1:8080` once (and `MQTITAN_TOKEN` if auth is on) instead of repeating `--controller`; the flag still overrides it.
 
-Put the scenario path or test ID before flags on `run`, `stop`, `results`, and `export`. A browser disconnect does not cancel a controller-managed test. Interrupting the running CLI requests cancellation.
+The scenario path or test ID on `run`, `stop`, `results`, and `export` may come before or after flags. `--workers` accepts comma-separated IDs; surrounding spaces are ignored. A browser disconnect does not cancel a controller-managed test. Interrupting the running CLI requests cancellation, even while a status poll is in flight. Controller error messages (for example, scenario validation failures) are printed with the HTTP status. A remote `run` tolerates up to four consecutive failed status polls before exiting; the test may still be running on the controller.
 
 ## Results and distributed workers
 
