@@ -182,3 +182,27 @@ it("shows actual EMQX connection and delivery metrics when configured", async ()
     globalThis.fetch = original;
   }
 });
+it("closes the wizard on Escape and records MQTT version and payload size", async () => {
+  let output = "";
+  const close = vi.fn();
+  render(
+    <Wizard
+      done={(s) => {
+        output = s;
+      }}
+      close={close}
+    />,
+  );
+  await userEvent.selectOptions(screen.getByLabelText("MQTT version"), "5");
+  const size = screen.getByLabelText("Payload size (bytes)");
+  await userEvent.clear(size);
+  await userEvent.type(size, "1024");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Review scenario" }),
+  );
+  const doc = parse(output);
+  expect(doc.broker.version).toBe("5");
+  expect(doc.workloads[0].payload.size).toBe(1024);
+  await userEvent.keyboard("{Escape}");
+  expect(close).toHaveBeenCalled();
+});

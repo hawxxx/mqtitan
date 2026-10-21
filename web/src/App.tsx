@@ -58,6 +58,7 @@ import "uplot/dist/uPlot.min.css";
 import {
   bytes,
   download,
+  elapsed,
   headers,
   latency,
   makeScenario,
@@ -124,6 +125,15 @@ function ErrorNotice({ error, retry }: { error: unknown; retry?: () => void }) {
     </div>
   );
 }
+function failedThresholds(t: Test) {
+  const failed = (t.thresholds || []).filter((x) => !x.passed);
+  return failed.length
+    ? `Thresholds failed: ${failed.map((x) => `${x.name} ${x.expression} (observed ${x.observed})`).join(", ")}`
+    : "";
+}
+function totalErrors(s: Test["snapshot"]) {
+  return s.connectErrors + s.publishErrors + (s.subscribeErrors || 0);
+}
 function Badge({ status }: { status: string }) {
   return (
     <span className={`badge ${status.toLowerCase()}`}>
@@ -173,6 +183,12 @@ function Title({
     </div>
   );
 }
+const chartFormat = {
+  messageRate: (v: number) => `${number(v)}/s`,
+  byteRate: (v: number) => `${bytes(v)}/s`,
+  connected: (v: number) => number(v),
+  p95: (v: number) => latency(v * 1e6),
+};
 function Chart({
   samples,
   field = "messageRate",
@@ -192,30 +208,47 @@ function Chart({
           ? s.snapshot.p95 / 1e6
           : s[field],
     );
+    // Plot elapsed run time; wall-clock ticks on short runs read as ":21.500".
+    const origin = Date.parse(samples[0].timestamp) / 1000;
+    const format = chartFormat[field];
     const plot = new uPlot(
       {
         width: host.current.clientWidth,
         height: 235,
+        scales: { x: { time: false } },
         series: [
-          {},
-          { label, stroke: "#39c7b0", width: 2, fill: "rgba(57,199,176,.09)" },
+          { label: "Elapsed", value: (_u, v) => (v == null ? "—" : elapsed(v)) },
+          {
+            label,
+            stroke: "#39c7b0",
+            width: 2,
+            fill: "rgba(57,199,176,.09)",
+            points: { show: samples.length <= 60 },
+            value: (_u, v) => (v == null ? "—" : format(v)),
+          },
         ],
         axes: [
           {
             stroke: "#7f949c",
             grid: { stroke: "rgba(127,148,156,.08)" },
             font: "11px monospace",
+            incrs: [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200],
+            values: (_u, ticks) => ticks.map(elapsed),
           },
           {
             stroke: "#7f949c",
             grid: { stroke: "rgba(127,148,156,.1)" },
             font: "11px monospace",
+            size: 72,
+            // Axis ticks are round numbers; drop the ".00" the readout keeps.
+            values: (_u, ticks) =>
+              ticks.map((v) => format(v).replace(/\.0+(?= )/, "")),
           },
         ],
         cursor: { drag: { x: true, y: false } },
-        legend: { show: false },
+        legend: { show: true, live: true },
       },
-      [samples.map((s) => Date.parse(s.timestamp) / 1000), values],
+      [samples.map((s) => Date.parse(s.timestamp) / 1000 - origin), values],
       host.current,
     );
     const resize = new ResizeObserver(() => {
@@ -560,8 +593,17 @@ export function Wizard({
     rate: 1,
     duration: 60,
     qos: 1,
+    version: "3.1.1",
+    payloadSize: 256,
   });
   const [error, setError] = useState("");
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
   const [certificateBusy, setCertificateBusy] = useState(false);
   const profiles = readStorage<
     { name: string; url: string; version?: string }[]
@@ -571,13 +613,18 @@ export function Wizard({
       setCertificateBusy(false);
     setV((p) => ({
       ...p,
-      [k]: ["clients", "capacity", "rate", "duration", "qos"].includes(k)
+      [k]: ["clients", "capacity", "rate", "duration", "qos", "payloadSize"].includes(k)
         ? Number(value)
         : value,
     }));
   }
   return (
-    <div className="modal-backdrop">
+    <div
+      className="modal-backdrop"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
       <section
         className="modal"
         role="dialog"
@@ -663,7 +710,7 @@ export function Wizard({
                 onChange={(e) => field("rate", e.target.value)}
               />
             </label>
-            <label>
+            <label className="span-2">
               Maximum clients (live controls)
               <input
                 type="number"
@@ -686,6 +733,16 @@ export function Wizard({
               />
             </label>
             <label>
+              Payload size (bytes)
+              <input
+                type="number"
+                min="1"
+                max={16 << 20}
+                value={v.payloadSize ?? 256}
+                onChange={(e) => field("payloadSize", e.target.value)}
+              />
+            </label>
+            <label>
               Quality of service
               <select
                 value={v.qos}
@@ -694,6 +751,16 @@ export function Wizard({
                 <option value="0">QoS 0 · At most once</option>
                 <option value="1">QoS 1 · At least once</option>
                 <option value="2">QoS 2 · Exactly once</option>
+              </select>
+            </label>
+            <label>
+              MQTT version
+              <select
+                value={v.version || "3.1.1"}
+                onChange={(e) => field("version", e.target.value)}
+              >
+                <option value="3.1.1">MQTT 3.1.1</option>
+                <option value="5">MQTT 5.0</option>
               </select>
             </label>
             <label>
@@ -728,7 +795,13 @@ export function Wizard({
               <strong>{number(v.clients * v.rate)} msg/s</strong>
             </span>
             <span>
-              Payload <strong>256 bytes</strong>
+              Payload <strong>{bytes(v.payloadSize ?? 256)}</strong>
+            </span>
+            <span>
+              Wire rate{" "}
+              <strong>
+                ~{bytes(v.clients * v.rate * ((v.payloadSize ?? 256) + 64))}/s
+              </strong>
             </span>
           </div>
           {error && (
@@ -959,11 +1032,18 @@ export function ScenarioEditor({
                 <CheckCircle2 size={17} /> Validated execution plan
               </h2>
               {Object.entries(plan.data)
-                .filter(([k]) => k !== "checks")
+                .filter(([k]) => k !== "checks" && k !== "Warnings")
                 .map(([k, v]) => (
                   <div className="plan-row" key={k}>
-                    <span>{k.replace(/([A-Z])/g, " $1").trim()}</span>
-                    <strong className="mono">{String(v)}</strong>
+                    <span>{planLabel(k)}</span>
+                    <strong className="mono">{planValue(k, v)}</strong>
+                  </div>
+                ))}
+              {Array.isArray(plan.data.Warnings) &&
+                plan.data.Warnings.map((w: string) => (
+                  <div className="capacity-check warn" key={w}>
+                    <strong>WARN · workload</strong>
+                    <p>{w}</p>
                   </div>
                 ))}
               {Array.isArray(plan.data.checks) &&
@@ -985,6 +1065,24 @@ export function ScenarioEditor({
       </div>
     </>
   );
+}
+// The plan endpoint returns Go field names and raw units (nanoseconds, bytes).
+function planLabel(key: string) {
+  const label = key
+    .replace(/^Estimated/, "Est. ")
+    .replace(/Bytes(PerSecond)?$/, "$1")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+  return label.charAt(0) + label.slice(1).toLowerCase();
+}
+function planValue(key: string, value: unknown) {
+  const n = Number(value);
+  if (typeof value !== "number" || !Number.isFinite(n)) return String(value);
+  if (key === "Duration") return elapsed(n / 1e9);
+  if (key.endsWith("BytesPerSecond")) return `${bytes(n)}/s`;
+  if (key.endsWith("Bytes")) return bytes(n);
+  if (key === "MessagesPerSecond") return `${number(n)} msg/s`;
+  return number(n);
 }
 function useStream(id: string, running: boolean) {
   const [state, setState] = useState("connecting");
@@ -1101,7 +1199,7 @@ function TestDetail({ id }: { id: string }) {
       <Title
         eyebrow={`TESTS / ${id.slice(0, 12)}`}
         title={t.name}
-        detail={`Started ${new Date(t.startedAt).toLocaleString()}${t.endedAt ? ` · Ended ${new Date(t.endedAt).toLocaleString()}` : ""}`}
+        detail={`Started ${new Date(t.startedAt).toLocaleString()}${t.endedAt ? ` · Ended ${new Date(t.endedAt).toLocaleString()} · Ran ${elapsed((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 1000)}` : ""}`}
       >
         <Badge status={t.status} />
         <RunAgainButton
@@ -1170,17 +1268,26 @@ function TestDetail({ id }: { id: string }) {
         </span>
       </div>
       <div className="metrics">
-        <Metric
-          label="CONNECTED / TARGET"
-          value={
-            <>
-              {number(s.connected)}
-              <em> / {number(s.targetClients)}</em>
-            </>
-          }
-          sub={`${number(s.peakConnected)} peak connected`}
-          accent
-        />
+        {t.status === "running" ? (
+          <Metric
+            label="CONNECTED / TARGET"
+            value={
+              <>
+                {number(s.connected)}
+                <em> / {number(s.targetClients)}</em>
+              </>
+            }
+            sub={`${number(s.peakConnected)} peak connected`}
+            accent
+          />
+        ) : (
+          <Metric
+            label="PEAK CONNECTED"
+            value={number(s.peakConnected)}
+            sub={`${number(s.connectAttempts)} connection attempts`}
+            accent
+          />
+        )}
         <Metric
           label="PUBLISHED"
           value={number(s.published)}
@@ -1193,11 +1300,12 @@ function TestDetail({ id }: { id: string }) {
         />
         <Metric
           label="TOTAL ERRORS"
-          value={number(s.connectErrors + s.publishErrors)}
-          sub={`${number(s.connectErrors)} connection · ${number(s.publishErrors)} publish`}
+          value={number(totalErrors(s))}
+          sub={`${number(s.connectErrors)} connection · ${number(s.publishErrors)} publish · ${number(s.subscribeErrors || 0)} subscribe`}
         />
       </div>
-      {t.loadControl && (
+      {t.loadControl &&
+        (t.status === "running" || !!t.loadChanges?.length) && (
         <LiveLoadControls
           test={t}
           onUpdated={(updated) => {
@@ -1270,6 +1378,13 @@ function TestDetail({ id }: { id: string }) {
             ) : (
               <Chart
                 samples={metrics.data || []}
+                label={
+                  tab === "Latency"
+                    ? "P95 latency"
+                    : tab === "Connections"
+                      ? "Connected"
+                      : "Messages / second"
+                }
                 field={
                   tab === "Latency"
                     ? "p95"
@@ -1289,6 +1404,8 @@ function TestDetail({ id }: { id: string }) {
                 ["Connected", s.connected],
                 ["Connecting", s.connecting],
                 ["Errors", s.connectErrors],
+                ["Reconnects", s.reconnects || 0],
+                ["Subscriptions", s.subscriptions || 0],
               ].map(([k, v]) => (
                 <div className="plan-row" key={k}>
                   <span>{k}</span>
@@ -1302,6 +1419,7 @@ function TestDetail({ id }: { id: string }) {
                 ["Publish attempts", number(s.publishAttempts)],
                 ["Publish errors", number(s.publishErrors)],
                 ["Bytes sent", bytes(s.bytesSent)],
+                ["Messages received", number(s.received)],
                 ["Bytes received", bytes(s.bytesReceived)],
                 ["P50 latency", latency(s.p50)],
               ].map(([k, v]) => (
@@ -1581,7 +1699,7 @@ function Workers() {
               <strong>{w.cpuCount}</strong>
             </div>
             <div className="plan-row">
-              <span>Memory</span>
+              <span>Process memory</span>
               <strong>{bytes(w.memoryBytes)}</strong>
             </div>
             <div className="plan-row">
@@ -1638,6 +1756,18 @@ function Workers() {
     </>
   );
 }
+const compareLabels: Record<string, string> = {
+  peakConnected: "Peak connected",
+  published: "Messages published",
+  received: "Messages received",
+  connectErrors: "Connection errors",
+  publishErrors: "Publish errors",
+  subscribeErrors: "Subscribe errors",
+  p50: "Publish latency P50",
+  p95: "Publish latency P95",
+  p99: "Publish latency P99",
+  bytesSent: "Bytes sent",
+};
 function Compare() {
   const q = useTests();
   const [a, setA] = useState("");
@@ -1681,7 +1811,12 @@ function Compare() {
               <tr>
                 <th>Metric</th>
                 {runs.map((t, i) => (
-                  <th key={i}>{t!.name}</th>
+                  <th key={i}>
+                    {i === 0 ? "A" : "B"} · {t!.name}
+                    <small className="compare-when">
+                      {new Date(t!.startedAt).toLocaleString()}
+                    </small>
+                  </th>
                 ))}
                 <th>Change (B − A)</th>
               </tr>
@@ -1694,14 +1829,23 @@ function Compare() {
                   "received",
                   "connectErrors",
                   "publishErrors",
+                  "subscribeErrors",
                   "p50",
                   "p95",
                   "p99",
                   "bytesSent",
                 ] as const
               ).map((k) => {
-                const x = runs[0]!.snapshot[k],
-                  y = runs[1]!.snapshot[k];
+                const x = runs[0]!.snapshot[k] || 0,
+                  y = runs[1]!.snapshot[k] || 0;
+                // Errors and latency improve downward; volume improves upward.
+                const lowerIsBetter = /Errors$|^p\d+$/.test(k);
+                const trend =
+                  y === x || k === "bytesSent"
+                    ? ""
+                    : y < x === lowerIsBetter
+                      ? "better"
+                      : "worse";
                 const fmt = (n: number) =>
                   k.startsWith("p") && ["p50", "p95", "p99"].includes(k)
                     ? latency(n)
@@ -1710,17 +1854,23 @@ function Compare() {
                       : number(n);
                 return (
                   <tr key={k}>
-                    <td>{k.replace(/([A-Z])/g, " $1")}</td>
+                    <td>{compareLabels[k]}</td>
                     <td className="mono">{fmt(x)}</td>
                     <td className="mono">{fmt(y)}</td>
-                    <td className="mono">
-                      {y > x ? "+" : ""}
-                      {fmt(y - x)}{" "}
-                      <span className="subdued">
-                        {x
-                          ? `(${(((y - x) / x) * 100).toFixed(1)}%)`
-                          : "(no baseline)"}
-                      </span>
+                    <td className={`mono delta ${trend}`}>
+                      {y === x ? (
+                        <span className="subdued">No change</span>
+                      ) : (
+                        <>
+                          {y > x ? "+" : ""}
+                          {fmt(y - x)}{" "}
+                          <span className="subdued">
+                            {x
+                              ? `(${y > x ? "+" : ""}${(((y - x) / x) * 100).toFixed(1)}%)`
+                              : "(no baseline)"}
+                          </span>
+                        </>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1743,7 +1893,11 @@ function Errors() {
   const q = useTests();
   const navigate = useNavigate();
   const tests = (q.data || []).filter(
-    (t) => t.error || t.snapshot.connectErrors || t.snapshot.publishErrors,
+    (t) =>
+      t.error ||
+      totalErrors(t.snapshot) ||
+      t.status === "failed" ||
+      t.status === "interrupted",
   );
   return (
     <>
@@ -1790,7 +1944,8 @@ function Errors() {
                 <strong>{t.name}</strong>
                 <p>
                   {t.error ||
-                    `${t.snapshot.connectErrors} connection errors · ${t.snapshot.publishErrors} publish errors`}
+                    failedThresholds(t) ||
+                    `${number(t.snapshot.connectErrors)} connection errors · ${number(t.snapshot.publishErrors)} publish errors · ${number(t.snapshot.subscribeErrors || 0)} subscribe errors`}
                 </p>
               </div>
               <Badge status={t.status} />
@@ -2013,6 +2168,12 @@ function PageContent({
   const navigate = useNavigate();
   const path = useRouterState({ select: (state) => state.location.pathname });
   const open = (id: string) => navigate({ to: "/tests/$id", params: { id } });
+  useEffect(() => {
+    const page = path.startsWith("/tests/")
+      ? "Test"
+      : nav.find(([, to]) => to === path)?.[0] || "Dashboard";
+    document.title = `${page} · MQTitan`;
+  }, [path]);
   if (path.startsWith("/tests/") && path.split("/")[2])
     return <TestDetail id={decodeURIComponent(path.split("/")[2])} />;
   if (path === "/scenarios")

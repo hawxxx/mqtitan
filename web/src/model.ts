@@ -26,6 +26,10 @@ export interface Snapshot {
   endToEndP95?: number;
   errors?: Record<string, number>;
   peakConnected: number;
+  subscriptions?: number;
+  subscribeErrors?: number;
+  reconnects?: number;
+  disconnects?: number;
 }
 export interface Test {
   id: string;
@@ -98,22 +102,25 @@ export interface WizardValues {
   username?: string;
   password?: string;
   version?: string;
+  payloadSize?: number;
   tls?: { profile?: string; serverName?: string };
 }
 export function makeScenario(v: WizardValues): string {
   const capacity = v.capacity ?? v.clients;
-  if (
-    !v.name.trim() ||
-    v.clients < 1 ||
-    !Number.isInteger(v.clients) ||
-    !Number.isInteger(capacity) ||
-    capacity < v.clients ||
-    capacity > 1000000 ||
-    v.rate <= 0 ||
-    v.duration <= 0 ||
-    ![0, 1, 2].includes(v.qos)
-  )
-    throw new Error("Enter a name and positive clients, rate, and duration.");
+  const payloadSize = v.payloadSize ?? 256;
+  if (!v.name.trim()) throw new Error("Enter a test name.");
+  if (!Number.isInteger(v.clients) || v.clients < 1 || v.clients > 1000000)
+    throw new Error("Clients must be a whole number from 1 to 1,000,000.");
+  if (!Number.isInteger(capacity) || capacity < v.clients || capacity > 1000000)
+    throw new Error(
+      "Maximum clients must be a whole number between Clients and 1,000,000.",
+    );
+  if (!(v.rate > 0) || v.rate > 1000000)
+    throw new Error("Messages per client must be above 0 and at most 1,000,000.");
+  if (!(v.duration > 0)) throw new Error("Duration must be positive.");
+  if (![0, 1, 2].includes(v.qos)) throw new Error("QoS must be 0, 1, or 2.");
+  if (!Number.isInteger(payloadSize) || payloadSize < 1 || payloadSize > 16 << 20)
+    throw new Error("Payload size must be from 1 byte to 16 MiB.");
   const broker = v.broker.replace(/^tcp:/, "mqtt:").replace(/^ssl:/, "mqtts:");
   if (!/^(mqtt|mqtts|ws|wss):\/\/.+/.test(broker))
     throw new Error("Broker URL must use mqtt, mqtts, ws, or wss.");
@@ -149,23 +156,42 @@ export function makeScenario(v: WizardValues): string {
         topic: "devices/${clientId}/telemetry",
         qos: v.qos,
         ratePerClient: v.rate,
-        payload: { type: "random", size: 256 },
+        payload: { type: "random", size: payloadSize },
       },
     ],
   });
 }
-export const latency = (n: number) => `${((n || 0) / 1e6).toFixed(2)} ms`;
+// Durations arrive in nanoseconds; pick the unit that keeps them readable.
+export const latency = (n: number) => {
+  const ns = n || 0;
+  const size = Math.abs(ns);
+  if (size >= 1e9) return `${(ns / 1e9).toFixed(2)} s`;
+  if (size >= 999.5e3 || ns === 0) return `${(ns / 1e6).toFixed(2)} ms`;
+  return `${Math.round(ns / 1e3)} µs`;
+};
 export const number = (n: number) =>
   new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 1,
     notation: Math.abs(n) >= 1e6 ? "compact" : "standard",
   }).format(n || 0);
-export const bytes = (n: number) =>
-  n >= 1048576
-    ? `${(n / 1048576).toFixed(1)} MB`
-    : n >= 1024
-      ? `${(n / 1024).toFixed(1)} KB`
-      : `${n || 0} B`;
+export const bytes = (n: number) => {
+  const size = Math.abs(n || 0);
+  return size >= 1073741824
+    ? `${(n / 1073741824).toFixed(2)} GB`
+    : size >= 1048576
+      ? `${(n / 1048576).toFixed(1)} MB`
+      : size >= 1024
+        ? `${(n / 1024).toFixed(1)} KB`
+        : `${n || 0} B`;
+};
+// Elapsed seconds as m:ss or h:mm:ss for chart axes and run durations.
+export const elapsed = (seconds: number) => {
+  const total = Math.max(0, Math.round(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+};
 export function headers() {
   const token = sessionStorage.getItem("mqtitan.token");
   return {
@@ -200,5 +226,6 @@ export async function download(id: string, format: string) {
   a.href = url;
   a.download = `mqtitan-${id}.${format}`;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoking synchronously can cancel the download before the browser reads the blob.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
