@@ -30,6 +30,9 @@ export interface Snapshot {
   subscribeErrors?: number;
   reconnects?: number;
   disconnects?: number;
+  publishSlotsMissed?: number;
+  correlationRejected?: number;
+  publishCancelled?: number;
 }
 export interface Test {
   id: string;
@@ -47,6 +50,7 @@ export interface Test {
   }[];
   error?: string;
   workerIds?: string[] | null;
+  lostWorkers?: string[];
   sourceTestId?: string;
   loadControl?: {
     capacityClients: number;
@@ -228,4 +232,31 @@ export async function download(id: string, format: string) {
   a.click();
   // Revoking synchronously can cancel the download before the browser reads the blob.
   setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// Run-quality warnings derived from generator-side counters. Thresholds are
+// deliberately small: any missed slot or skewed sample changes how results
+// should be read.
+export function runWarnings(t: Test): string[] {
+  const s = t.snapshot;
+  const out: string[] = [];
+  const missed = s.publishSlotsMissed || 0;
+  const scheduled = missed + (s.publishAttempts || 0);
+  if (scheduled > 0 && missed / scheduled >= 0.01)
+    out.push(
+      `Generator saturation: ${((missed / scheduled) * 100).toFixed(1)}% of scheduled publish slots were skipped because earlier publishes had not completed. The achieved rate is below the requested rate; check worker CPU and broker acknowledgement latency.`,
+    );
+  const rejected = s.correlationRejected || 0;
+  const correlated = rejected + (s.correlationSamples || 0);
+  // A wall-clock step can reject a handful of samples on a single host; warn
+  // when rejections are large enough to bias the percentiles.
+  if (correlated > 0 && rejected / correlated >= 0.001)
+    out.push(
+      `${s.correlationRejected} correlated messages carried timestamps in the future or older than ten minutes and were excluded from end-to-end latency. Synchronize publisher and subscriber clocks.`,
+    );
+  if (t.lostWorkers?.length)
+    out.push(
+      `Lost workers: ${t.lostWorkers.join(", ")}. Their partitions stopped early; results include their last reported counters only.`,
+    );
+  return out;
 }

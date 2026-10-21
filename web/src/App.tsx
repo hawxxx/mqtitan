@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { LatencyPanel } from "./LatencyPanel";
 import { CertificateSettings } from "./CertificateSettings";
@@ -60,6 +61,7 @@ import {
   download,
   elapsed,
   headers,
+  runWarnings,
   latency,
   makeScenario,
   number,
@@ -274,7 +276,11 @@ function Chart({
           <small>Metrics appear after a test begins.</small>
         </div>
       ) : (
-        <div ref={host} />
+        <div
+          ref={host}
+          role="img"
+          aria-label={`${label} chart over ${elapsed(Date.parse(samples[samples.length - 1].timestamp) / 1000 - Date.parse(samples[0].timestamp) / 1000)}; peak ${chartFormat[field](Math.max(...samples.map((s) => (field === "connected" ? s.snapshot.connected : field === "p95" ? s.snapshot.p95 / 1e6 : s[field]))))}`}
+        />
       )}
     </div>
   );
@@ -392,13 +398,29 @@ function RunTable({
           />
         </label>
       </div>
-      <div className="table-scroll" ref={parent}>
-        <table>
+      <div
+        className="table-scroll"
+        ref={parent}
+        tabIndex={0}
+        role="region"
+        aria-label="Test history"
+      >
+        <table className="run-table">
           <thead>
             {table.getHeaderGroups().map((g) => (
               <tr key={g.id}>
                 {g.headers.map((h) => (
-                  <th key={h.id}>
+                  <th
+                    key={h.id}
+                    className={`col-${h.column.id}`}
+                    aria-sort={
+                      h.column.getIsSorted() === "desc"
+                        ? "descending"
+                        : h.column.getIsSorted() === "asc"
+                          ? "ascending"
+                          : undefined
+                    }
+                  >
                     <button onClick={h.column.getToggleSortingHandler()}>
                       {flexRender(h.column.columnDef.header, h.getContext())}
                       {h.column.getIsSorted() === "desc"
@@ -423,7 +445,7 @@ function RunTable({
               return (
                 <tr key={r.id}>
                   {r.getVisibleCells().map((c) => (
-                    <td key={c.id}>
+                    <td key={c.id} className={`col-${c.column.id}`}>
                       {flexRender(c.column.columnDef.cell, c.getContext())}
                     </td>
                   ))}
@@ -597,13 +619,41 @@ export function Wizard({
     payloadSize: 256,
   });
   const [error, setError] = useState("");
+  const dialog = useRef<HTMLElement>(null);
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  // Modal focus: move focus in, keep Tab inside, make the page behind inert,
+  // and return focus to whatever opened the wizard.
   useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    const shell = document.querySelector<HTMLElement>(".app-shell");
+    shell?.setAttribute("inert", "");
+    dialog.current?.querySelector<HTMLElement>("input, select, button")?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") closeRef.current();
+      if (e.key !== "Tab" || !dialog.current) return;
+      const items = [
+        ...dialog.current.querySelectorAll<HTMLElement>(
+          "input:not([disabled]), select:not([disabled]), textarea, button:not([disabled]), [href]",
+        ),
+      ];
+      const first = items[0],
+        last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last?.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first?.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [close]);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      shell?.removeAttribute("inert");
+      opener?.focus?.();
+    };
+  }, []);
   const [certificateBusy, setCertificateBusy] = useState(false);
   const profiles = readStorage<
     { name: string; url: string; version?: string }[]
@@ -618,7 +668,7 @@ export function Wizard({
         : value,
     }));
   }
-  return (
+  return createPortal(
     <div
       className="modal-backdrop"
       onMouseDown={(e) => {
@@ -626,6 +676,7 @@ export function Wizard({
       }}
     >
       <section
+        ref={dialog}
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -823,7 +874,8 @@ export function Wizard({
           </div>
         </form>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 const defaultYAML = makeScenario({
@@ -1246,25 +1298,45 @@ function TestDetail({ id }: { id: string }) {
       {(stop.error || exportError || t.error) && (
         <ErrorNotice error={stop.error || exportError || t.error} />
       )}
-      <div className="tabs">
+      {runWarnings(t).map((w) => (
+        <div className="notice warning run-warning" role="status" key={w}>
+          <TriangleAlert size={18} />
+          <p>{w}</p>
+        </div>
+      ))}
+      <div className="tabs" role="tablist" aria-label="Test views">
         {["Overview", "Latency", "Connections", "Thresholds", "Scenario"].map(
           (x) => (
             <button
               className={tab === x ? "active" : ""}
               key={x}
+              role="tab"
+              aria-selected={tab === x}
               onClick={() => setTab(x)}
             >
               {x}
             </button>
           ),
         )}
-        <span className={`stream ${stream}`}>
+        <span
+          className={`stream ${stream}`}
+          role="status"
+          title={
+            stream === "live"
+              ? "Live stream"
+              : stream === "recorded"
+                ? "Recorded metrics"
+                : `${stream} · polling active`
+          }
+        >
           <i />
-          {stream === "live"
-            ? "Live stream"
-            : stream === "recorded"
-              ? "Recorded metrics"
-              : `${stream} · polling active`}
+          <span className="label">
+            {stream === "live"
+              ? "Live stream"
+              : stream === "recorded"
+                ? "Recorded metrics"
+                : `${stream} · polling active`}
+          </span>
         </span>
       </div>
       <div className="metrics">
@@ -1301,7 +1373,7 @@ function TestDetail({ id }: { id: string }) {
         <Metric
           label="TOTAL ERRORS"
           value={number(totalErrors(s))}
-          sub={`${number(s.connectErrors)} connection · ${number(s.publishErrors)} publish · ${number(s.subscribeErrors || 0)} subscribe`}
+          sub={`${number(s.connectErrors)} connection · ${number(s.publishErrors)} publish · ${number(s.subscribeErrors || 0)} subscribe${s.errors?.timeout ? ` (${number(s.errors.timeout)} timed out)` : ""}`}
         />
       </div>
       {t.loadControl &&
@@ -1418,6 +1490,8 @@ function TestDetail({ id }: { id: string }) {
               {[
                 ["Publish attempts", number(s.publishAttempts)],
                 ["Publish errors", number(s.publishErrors)],
+                ["Missed publish slots", number(s.publishSlotsMissed || 0)],
+                ["Clock-skewed correlations", number(s.correlationRejected || 0)],
                 ["Bytes sent", bytes(s.bytesSent)],
                 ["Messages received", number(s.received)],
                 ["Bytes received", bytes(s.bytesReceived)],
@@ -2065,6 +2139,7 @@ function Shell() {
               key={to}
               to={to}
               aria-label={label}
+              title={label}
               activeProps={{ className: "active" }}
               activeOptions={{ exact: to === "/" }}
             >
@@ -2091,10 +2166,14 @@ function Shell() {
           </div>
           <button
             className="theme-button"
+            aria-label={theme === "dark" ? "Light appearance" : "Dark appearance"}
+            title={theme === "dark" ? "Light appearance" : "Dark appearance"}
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >
             <Sun size={16} />
-            {theme === "dark" ? "Light appearance" : "Dark appearance"}
+            <span className="label">
+              {theme === "dark" ? "Light appearance" : "Dark appearance"}
+            </span>
           </button>
         </div>
       </aside>
@@ -2114,7 +2193,7 @@ function Shell() {
               className="topbar-new"
               onClick={() => setWizard(true)}
             >
-              <Plus size={15} /> New test
+              <Plus size={15} /> <span className="label">New test</span>
             </button>
           </div>
         </header>

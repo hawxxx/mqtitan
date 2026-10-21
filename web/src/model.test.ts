@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bytes, elapsed, makeScenario, latency, request } from "./model";
+import { bytes, elapsed, makeScenario, latency, request, runWarnings, type Test } from "./model";
 import { parse } from "yaml";
 describe("scenario wizard", () => {
   it("allows spare client capacity for later live increases", () => {
@@ -111,5 +111,30 @@ describe("formatters", () => {
     const base = { name: "x", broker: "mqtt://b:1883", clients: 10, rate: 1, duration: 5, qos: 0 };
     expect(makeScenario({ ...base, payloadSize: 1024 })).toContain("size: 1024");
     expect(() => makeScenario({ ...base, capacity: 5 })).toThrow(/Maximum clients/);
+  });
+});
+describe("run warnings", () => {
+  const base = {
+    id: "t",
+    name: "t",
+    status: "completed",
+    startedAt: "",
+    scenario: "",
+    thresholds: [],
+  };
+  it("flags generator saturation, clock skew and lost workers", () => {
+    const w = runWarnings({
+      ...base,
+      lostWorkers: ["w2"],
+      snapshot: { publishAttempts: 90, publishSlotsMissed: 10, correlationRejected: 3, correlationSamples: 100 },
+    } as unknown as Test);
+    expect(w).toHaveLength(3);
+    expect(w[0]).toContain("10.0%");
+    expect(w[2]).toContain("w2");
+  });
+  it("stays quiet for a healthy run", () => {
+    expect(
+      runWarnings({ ...base, snapshot: { publishAttempts: 1000, publishSlotsMissed: 1, correlationRejected: 26, correlationSamples: 780000 } } as unknown as Test),
+    ).toEqual([]);
   });
 });

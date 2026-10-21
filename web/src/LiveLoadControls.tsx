@@ -47,6 +47,10 @@ export function LiveLoadControls({
     rate >= 0 &&
     rate <= control.maxRatePerClient;
   const running = test.status === "running";
+  // A draft only counts as changed while it differs from the applied load,
+  // so moving a slider away and back clears "Unapplied changes".
+  const changed =
+    dirty && (clients !== target || rate !== control.ratePerClient);
   function resetDraft() {
     setClients(target);
     setRate(control.ratePerClient);
@@ -110,11 +114,21 @@ export function LiveLoadControls({
           </p>
         </div>
         <div className="live-load-actions">
-          <span className={`draft-indicator ${dirty ? "is-dirty" : ""}`}>
+          <span
+            className={`draft-indicator ${changed ? "is-dirty" : ""}`}
+            aria-live="polite"
+            title={`Applied: ${number(target)} clients · ${number(control.ratePerClient)} msg/s per publisher`}
+          >
             <i />
-            {dirty ? "Unapplied changes" : "No draft changes"}
+            {changed ? "Unapplied changes" : "No draft changes"}
           </span>
-          {dirty && (
+          {changed && (
+            <span className="draft-applied">
+              Applied: {number(target)} clients ·{" "}
+              {number(control.ratePerClient)} msg/s
+            </span>
+          )}
+          {changed && (
             <button
               className="load-reset"
               type="button"
@@ -127,7 +141,7 @@ export function LiveLoadControls({
           <button
             className="primary"
             type="button"
-            disabled={!running || !dirty || !valid || busy}
+            disabled={!running || !changed || !valid || busy}
             onClick={apply}
           >
             {busy ? "Applying…" : "Apply load"}
