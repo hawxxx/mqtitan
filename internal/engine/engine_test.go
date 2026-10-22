@@ -544,3 +544,42 @@ func TestEngineRecordsRemoteAddress(t *testing.T) {
 		t.Fatalf("address labels = %+v", got.AddressLabels)
 	}
 }
+
+type refuseConnectHook struct{ broker.HookBase }
+
+func (h *refuseConnectHook) ID() string { return "refuse-connect" }
+func (h *refuseConnectHook) Provides(b byte) bool {
+	return b == broker.OnConnectAuthenticate
+}
+func (h *refuseConnectHook) OnConnectAuthenticate(*broker.Client, packets.Packet) bool { return false }
+
+func TestRefusedConnectLeavesNoActiveRemote(t *testing.T) {
+	b := broker.New(&broker.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err := b.AddHook(new(refuseConnectHook), nil); err != nil {
+		t.Fatal(err)
+	}
+	l := listeners.NewTCP(listeners.Config{ID: "refuse", Address: "127.0.0.1:0"})
+	if err := b.AddListener(l); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	s := baseScenario("mqtt://"+l.Address(), "5")
+	s.Clients.Count = 1
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 200 * time.Millisecond}, TargetClients: 1}}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	if got.ConnectErrors == 0 || got.ConnectFailures["mqtt_connack"] == 0 {
+		t.Fatalf("expected CONNACK refusals, got %+v", got.ConnectFailures)
+	}
+	if len(got.RemoteAddresses) != 0 {
+		t.Fatalf("failed connects recorded remotes: %+v", got.RemoteAddresses)
+	}
+}

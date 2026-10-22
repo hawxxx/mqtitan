@@ -58,7 +58,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		labels = append(labels, l.Label)
 	}
 	e.Metrics.SetAddressLabels(prefixes, labels)
-	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, OnConnect: e.Metrics.RecordRemote, Seed: e.Scenario.Seed})
+	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, Seed: e.Scenario.Seed})
 	if err != nil {
 		return err
 	}
@@ -253,6 +253,7 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 		e.Metrics.Reconnects.Add(1)
 	}
 	e.Metrics.ClientConnected()
+	e.Metrics.RecordRemote(c.RemoteAddr())
 	// A session ended by a recorded subscribe failure is not an unexpected disconnect.
 	failed := false
 	defer func() {
