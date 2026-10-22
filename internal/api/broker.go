@@ -123,6 +123,10 @@ func (m *Manager) startTelemetry(ctx context.Context, r *execution, t scenario.T
 		}
 		r.brokers = append(r.brokers, s)
 		m.notify(r, Event{"broker", s})
+		if level, message := telemetryChange(r.lastBroker, s); message != "" {
+			m.logEvent(r, level, "%s", message)
+		}
+		r.lastBroker = &s
 		m.mu.Unlock()
 	}
 	if first != nil {

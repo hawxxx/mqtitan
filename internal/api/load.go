@@ -110,6 +110,7 @@ func (m *Manager) UpdateLoad(id string, request LoadRequest) (Test, error) {
 		partition.Clients = max(0, min(a.CapacityClients, load.Clients-a.ClientOffset))
 		a.Load = &partition
 	}
+	m.logEvent(r, "action", "Live load changed: clients %d → %d, rate %g → %g msg/s per client", current.Clients, load.Clients, current.RatePerClient, load.RatePerClient)
 	r.test = updated
 	response := updated
 	responseControl := next

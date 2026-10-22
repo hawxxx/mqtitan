@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"github.com/mqtitan/mqtitan/internal/engine"
 	"github.com/mqtitan/mqtitan/internal/metrics"
+	"github.com/mqtitan/mqtitan/internal/platform"
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type Worker struct {
@@ -22,6 +25,8 @@ type Worker struct {
 	LastSeen            time.Time `json:"lastSeen"`
 	ClockOffsetMS       float64   `json:"clockOffsetMs"`
 	SupportsLiveControl bool      `json:"supportsLiveControl"`
+	// Host is self-reported at registration and only displayed.
+	Host *platform.Host `json:"host,omitempty"`
 	// Session is issued by the controller at registration and must accompany
 	// every heartbeat. It is never listed, so another API caller cannot pose
 	// as a registered worker and receive its assignment (with credentials).
@@ -117,6 +122,7 @@ func (r *workerRegistry) register(w Worker) (string, error) {
 	if existing != nil && !owner && existing.heartbeated && now.Sub(existing.LastSeen) <= workerLease {
 		return "", errors.New("worker ID is in use by a live worker; use another ID")
 	}
+	w.Host = cleanHost(w.Host)
 	w.Session = ID() + ID()
 	w.Status = "ready"
 	w.LastSeen = now
@@ -220,4 +226,34 @@ func (m *Manager) workerRoutes(mux *http.ServeMux) {
 		}
 		writeJSON(w, 200, v)
 	})
+}
+
+// cleanHost bounds self-reported host text: it is untrusted input shown to
+// every operator, so control characters are dropped and lengths capped.
+func cleanHost(h *platform.Host) *platform.Host {
+	if h == nil {
+		return nil
+	}
+	c := *h
+	for _, f := range []*string{&c.Hostname, &c.OS, &c.Arch, &c.Distro, &c.Kernel, &c.CPUModel, &c.Container, &c.GoVersion, &c.Version} {
+		*f = cleanText(*f, 128)
+	}
+	c.CPUs = max(0, min(c.CPUs, 1<<16))
+	if c.CPULimit < 0 || c.CPULimit > 1<<16 {
+		c.CPULimit = 0
+	}
+	return &c
+}
+
+func cleanText(s string, limit int) string {
+	out := make([]rune, 0, min(len(s), limit))
+	for _, r := range s {
+		if len(out) == limit {
+			break
+		}
+		if unicode.IsPrint(r) {
+			out = append(out, r)
+		}
+	}
+	return strings.TrimSpace(string(out))
 }

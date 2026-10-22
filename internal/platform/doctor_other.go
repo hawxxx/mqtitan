@@ -9,3 +9,5 @@ func Doctor() []Check {
 }
 func MemoryTotal() string       { return "unknown" }
 func CurrentCapacity() Capacity { return Capacity{} }
+
+func HostInfo(version string) Host { return baseHost(version) }
