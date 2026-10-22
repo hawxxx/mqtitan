@@ -121,3 +121,38 @@ workloads: [{type: publisher, clients: 2, topic: test, qos: 0, ratePerClient: 1,
 		})
 	}
 }
+
+func TestAddressLabelsValidation(t *testing.T) {
+	base := `apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: labels
+broker: {url: 'mqtt://broker.example.net:1883', version: '3.1.1', addressLabels: [%L%]}
+clients: {count: 2, idTemplate: 'client-${sequence}'}
+stages: [{duration: 1s, targetClients: 2}]
+workloads: [{type: publisher, clients: 2, topic: test, qos: 0, ratePerClient: 1, payload: {type: static}}]
+`
+	many := make([]string, 257)
+	for i := range many {
+		many[i] = fmt.Sprintf("{cidr: '10.%d.%d.0/24', label: l%d}", i/256, i%256, i)
+	}
+	for _, tt := range []struct{ name, l, want string }{
+		{"valid", "{cidr: '198.51.100.0/24', label: a}, {cidr: '2001:db8::/32', label: b}, {cidr: '198.51.100.0/28', label: a}", ""},
+		{"bad cidr", "{cidr: '198.51.100.0/33', label: a}", "broker.addressLabels[0].cidr is not a valid CIDR"},
+		{"empty label", "{cidr: '198.51.100.0/24', label: ''}", "broker.addressLabels[0].label is required"},
+		{"duplicate", "{cidr: '198.51.100.0/24', label: a}, {cidr: '198.51.100.0/24', label: b}", "broker.addressLabels[1].cidr duplicates"},
+		{"too many", strings.Join(many, ","), "broker.addressLabels allows at most 256 entries"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse([]byte(strings.Replace(base, "%L%", tt.l, 1)))
+			if tt.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}

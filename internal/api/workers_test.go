@@ -1,7 +1,12 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"testing"
 	"time"
 
@@ -214,4 +219,35 @@ func TestPeakNeverBelowSingleWorkerPeak(t *testing.T) {
 	if got := m.workerSnapshot(r).PeakConnected; got != 50 {
 		t.Fatalf("peak = %d, want 50", got)
 	}
+}
+
+func TestHeartbeatWithFullLabelSetsFitsLimit(t *testing.T) {
+	full := func(prefix string) []metrics.LabelCount {
+		l := make([]metrics.LabelCount, metrics.MaxLabelKeys+1)
+		for i := range l {
+			l[i] = metrics.LabelCount{Key: fmt.Sprintf("%s%d:65535", prefix, i), Label: fmt.Sprintf("label-%0120d", i), Connects: uint64(i) * 7919, Active: int64(i)}
+		}
+		return l
+	}
+	c := metrics.New()
+	for i := range 5000 {
+		c.RecordPublishLatencyFor(i, time.Duration(i+1)*time.Microsecond)
+		c.RecordEndToEndLatencyFor(i, time.Duration(i+1)*time.Microsecond)
+		c.RecordConnectionLatencyFor(i, time.Duration(i+1)*time.Microsecond)
+	}
+	snap := c.Snapshot()
+	snap.RemoteAddresses, snap.AddressLabels, snap.DNSAnswers, snap.DNSErrors = full("2001:db8::"), full("l"), full("2001:db8:1::"), full("2001:db8:2::")
+	hb := Heartbeat{ID: "w1", Report: &Report{AssignmentID: "a1", Snapshot: snap, Distribution: c.ExportDistribution()}}
+	var raw, z bytes.Buffer
+	zw := gzip.NewWriter(&z)
+	if err := json.NewEncoder(io.MultiWriter(&raw, zw)).Encode(hb); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if z.Len() >= 2<<20 || raw.Len() >= 8<<20 {
+		t.Fatalf("compressed %d, decompressed %d exceed the 2 MiB / 8 MiB bounds", z.Len(), raw.Len())
+	}
+	t.Logf("compressed %d bytes, decompressed %d bytes", z.Len(), raw.Len())
 }

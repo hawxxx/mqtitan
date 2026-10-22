@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"github.com/mqtitan/mqtitan/internal/metrics"
+	"io"
 	"net/http"
 	"runtime"
 	"sort"
@@ -97,6 +98,13 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 	// Quantiles describe the latest run. Historical comparisons use the API.
 	if len(tests) > 0 {
 		s := tests[0].Snapshot
+		latest := tests[0]
+		for _, t := range tests[1:] {
+			if t.StartedAt.After(latest.StartedAt) {
+				latest = t
+			}
+		}
+		writeLabelSeries(w, latest.Snapshot)
 		fmt.Fprintln(w, "# TYPE emqxload_e2e_latency_seconds gauge")
 		for _, p := range []struct {
 			q string
@@ -112,4 +120,31 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 	var memory runtime.MemStats
 	runtime.ReadMemStats(&memory)
 	fmt.Fprintf(w, "emqxload_worker_memory_bytes{worker=\"local\"} %d\n", memory.Sys)
+}
+
+// writeLabelSeries exports the address and DNS distribution of one test.
+// Rows come from stored snapshots, so each list is cut at the cardinality cap.
+func writeLabelSeries(w io.Writer, s metrics.Snapshot) {
+	limit := func(l []metrics.LabelCount) []metrics.LabelCount { return l[:min(len(l), metrics.MaxLabelKeys+1)] }
+	type series struct {
+		name, kind string
+		rows       []metrics.LabelCount
+		line       func(r metrics.LabelCount) string
+		value      func(r metrics.LabelCount) string
+	}
+	for _, sr := range []series{
+		{"emqxload_remote_connects_total", "counter", s.RemoteAddresses, func(r metrics.LabelCount) string { return fmt.Sprintf("{address=%q,label=%q}", r.Key, r.Label) }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
+		{"emqxload_remote_active", "gauge", s.RemoteAddresses, func(r metrics.LabelCount) string { return fmt.Sprintf("{address=%q,label=%q}", r.Key, r.Label) }, func(r metrics.LabelCount) string { return strconv.FormatInt(r.Active, 10) }},
+		{"emqxload_address_label_active", "gauge", s.AddressLabels, func(r metrics.LabelCount) string { return fmt.Sprintf("{label=%q}", r.Key) }, func(r metrics.LabelCount) string { return strconv.FormatInt(r.Active, 10) }},
+		{"emqxload_dns_answers_total", "counter", s.DNSAnswers, func(r metrics.LabelCount) string { return fmt.Sprintf("{address=%q}", r.Key) }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
+		{"emqxload_dns_errors_total", "counter", s.DNSErrors, func(r metrics.LabelCount) string { return fmt.Sprintf("{resolver=%q}", r.Key) }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
+	} {
+		if len(sr.rows) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "# TYPE %s %s\n", sr.name, sr.kind)
+		for _, r := range limit(sr.rows) {
+			fmt.Fprintf(w, "%s%s %s\n", sr.name, sr.line(r), sr.value(r))
+		}
+	}
 }

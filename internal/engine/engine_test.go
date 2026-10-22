@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -519,5 +520,27 @@ func TestEngineCountsConnectFailureStage(t *testing.T) {
 	got := m.Snapshot()
 	if got.ConnectErrors == 0 || got.ConnectFailures["tcp"] != got.ConnectErrors || len(got.ConnectFailures) != 1 {
 		t.Fatalf("connectErrors=%d connectFailures=%v", got.ConnectErrors, got.ConnectFailures)
+	}
+}
+
+func TestEngineRecordsRemoteAddress(t *testing.T) {
+	url := testBroker(t)
+	addr := strings.TrimPrefix(url, "mqtt://")
+	s := baseScenario(url, "5")
+	s.Clients.Count = 1
+	s.Broker.AddressLabels = []scenario.AddressLabel{{CIDR: "127.0.0.0/8", Label: "loopback"}}
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 300 * time.Millisecond}, TargetClients: 1}}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	if len(got.RemoteAddresses) != 1 || got.RemoteAddresses[0].Key != addr || got.RemoteAddresses[0].Connects != 1 || got.RemoteAddresses[0].Active != 0 || got.RemoteAddresses[0].Label != "loopback" {
+		t.Fatalf("remote addresses = %+v, want %s", got.RemoteAddresses, addr)
+	}
+	if len(got.AddressLabels) != 1 || got.AddressLabels[0].Key != "loopback" || got.AddressLabels[0].Connects != 1 || got.AddressLabels[0].Active != 0 {
+		t.Fatalf("address labels = %+v", got.AddressLabels)
 	}
 }

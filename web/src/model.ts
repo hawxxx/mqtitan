@@ -1,4 +1,10 @@
 import { stringify } from "yaml";
+export interface LabelCount {
+  key: string;
+  label?: string;
+  connects: number;
+  active: number;
+}
 export interface Snapshot {
   connected: number;
   targetClients: number;
@@ -27,6 +33,10 @@ export interface Snapshot {
   errors?: Record<string, number>;
   connectFailures?: Record<string, number>;
   connackReasons?: Record<string, number>;
+  remoteAddresses?: LabelCount[];
+  addressLabels?: LabelCount[];
+  dnsAnswers?: LabelCount[];
+  dnsErrors?: LabelCount[];
   peakConnected: number;
   subscriptions?: number;
   subscribeErrors?: number;

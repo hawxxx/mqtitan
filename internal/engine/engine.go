@@ -12,6 +12,7 @@ import (
 	transport "github.com/mqtitan/mqtitan/internal/mqtt"
 	"github.com/mqtitan/mqtitan/internal/payload"
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -46,7 +47,18 @@ func (e *Engine) Run(ctx context.Context) error {
 	if rate <= 0 {
 		rate = 500
 	}
-	connector, err := transport.NewConnector(e.Scenario.Broker)
+	var prefixes []netip.Prefix
+	var labels []string
+	for _, l := range e.Scenario.Broker.AddressLabels {
+		p, err := netip.ParsePrefix(l.CIDR)
+		if err != nil {
+			return fmt.Errorf("broker.addressLabels: %w", err)
+		}
+		prefixes = append(prefixes, netip.PrefixFrom(p.Addr().Unmap(), p.Bits()))
+		labels = append(labels, l.Label)
+	}
+	e.Metrics.SetAddressLabels(prefixes, labels)
+	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, OnConnect: e.Metrics.RecordRemote, Seed: e.Scenario.Seed})
 	if err != nil {
 		return err
 	}
@@ -246,6 +258,7 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 	defer func() {
 		up = time.Since(connectedAt)
 		c.Close()
+		e.Metrics.ReleaseRemote(c.RemoteAddr())
 		e.Metrics.Connected.Add(-1)
 		e.Metrics.Disconnects.Add(1)
 		if ctx.Err() == nil && !failed {

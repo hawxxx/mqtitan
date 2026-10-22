@@ -282,3 +282,60 @@ func TestPrometheusDropsInvalidWorkerKeys(t *testing.T) {
 		}
 	}
 }
+
+func addressSnapshot() metrics.Snapshot {
+	return metrics.Snapshot{
+		RemoteAddresses: []metrics.LabelCount{{Key: "192.0.2.1:1883", Label: "new-nlb-1a", Connects: 7, Active: 5}, {Key: "192.0.2.2:1883", Label: "unlabelled", Connects: 3, Active: 3}, {Key: "other", Connects: 2}},
+		AddressLabels:   []metrics.LabelCount{{Key: "new-nlb-1a", Connects: 7, Active: 5}, {Key: "we\"ird\n", Connects: 1, Active: 1}},
+		DNSAnswers:      []metrics.LabelCount{{Key: "192.0.2.1", Connects: 4}},
+		DNSErrors:       []metrics.LabelCount{{Key: "192.0.2.53:53", Connects: 2}},
+	}
+}
+
+func TestPrometheusRemoteAddressSeries(t *testing.T) {
+	m, h := setup(t)
+	old := metrics.Snapshot{RemoteAddresses: []metrics.LabelCount{{Key: "198.51.100.9:1883", Connects: 99, Active: 9}}}
+	if err := m.persist(Test{ID: "addr-old", Name: "o", Status: "completed", StartedAt: time.Now().Add(-time.Hour), Snapshot: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.persist(Test{ID: "addr-new", Name: "n", Status: "completed", StartedAt: time.Now(), Snapshot: addressSnapshot()}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	body := w.Body.String()
+	for _, want := range []string{
+		`emqxload_remote_connects_total{address="192.0.2.1:1883",label="new-nlb-1a"} 7`,
+		`emqxload_remote_active{address="192.0.2.1:1883",label="new-nlb-1a"} 5`,
+		`emqxload_remote_connects_total{address="other",label=""} 2`,
+		`emqxload_address_label_active{label="new-nlb-1a"} 5`,
+		`emqxload_address_label_active{label="we\"ird\n"} 1`,
+		`emqxload_dns_answers_total{address="192.0.2.1"} 4`,
+		`emqxload_dns_errors_total{resolver="192.0.2.53:53"} 2`,
+	} {
+		if !strings.Contains(body, want+"\n") {
+			t.Fatalf("missing %s in\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "198.51.100.9") {
+		t.Fatal("older test exported per-address series")
+	}
+}
+
+func TestStreamIncludesRemoteAddresses(t *testing.T) {
+	m, h := setup(t)
+	if err := m.persist(Test{ID: "addr-stream", Name: "s", Status: "completed", Snapshot: addressSnapshot()}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/api/v1/tests/addr-stream/stream", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	for _, want := range []string{`"remoteAddresses":[{"key":"192.0.2.1:1883","label":"new-nlb-1a","connects":7,"active":5}`, `"addressLabels":`, `"dnsAnswers":`, `"dnsErrors":`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("missing %s in %s", want, w.Body.String())
+		}
+	}
+}

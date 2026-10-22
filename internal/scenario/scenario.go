@@ -45,17 +45,24 @@ type Scenario struct {
 }
 
 type Broker struct {
-	URL              string    `yaml:"url"`
-	Version          string    `yaml:"version"`
-	Username         string    `yaml:"username,omitempty"`
-	Password         string    `yaml:"password,omitempty"`
-	ConnectTimeout   Duration  `yaml:"connectTimeout"`
-	KeepAlive        Duration  `yaml:"keepAlive"`
-	CleanStart       bool      `yaml:"cleanStart"`
-	OperationTimeout Duration  `yaml:"operationTimeout,omitempty"`
-	TLS              TLS       `yaml:"tls,omitempty"`
-	Reconnect        Reconnect `yaml:"reconnect,omitempty"`
-	DNS              *DNS      `yaml:"dns,omitempty"`
+	URL              string         `yaml:"url"`
+	Version          string         `yaml:"version"`
+	Username         string         `yaml:"username,omitempty"`
+	Password         string         `yaml:"password,omitempty"`
+	ConnectTimeout   Duration       `yaml:"connectTimeout"`
+	KeepAlive        Duration       `yaml:"keepAlive"`
+	CleanStart       bool           `yaml:"cleanStart"`
+	OperationTimeout Duration       `yaml:"operationTimeout,omitempty"`
+	TLS              TLS            `yaml:"tls,omitempty"`
+	Reconnect        Reconnect      `yaml:"reconnect,omitempty"`
+	DNS              *DNS           `yaml:"dns,omitempty"`
+	AddressLabels    []AddressLabel `yaml:"addressLabels,omitempty"`
+}
+
+// AddressLabel names a broker address range for the distribution report.
+type AddressLabel struct {
+	CIDR  string `yaml:"cidr"`
+	Label string `yaml:"label"`
 }
 
 // DNS controls how the broker hostname is resolved.
@@ -215,6 +222,28 @@ func (s Scenario) Validate() error {
 		case "", "any", "ipv4", "ipv6":
 		default:
 			problems = append(problems, "broker.dns.family must be any, ipv4 or ipv6")
+		}
+	}
+	if len(s.Broker.AddressLabels) > 256 {
+		problems = append(problems, "broker.addressLabels allows at most 256 entries")
+	} else {
+		seen := map[netip.Prefix]bool{}
+		for i, l := range s.Broker.AddressLabels {
+			p, err := netip.ParsePrefix(l.CIDR)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("broker.addressLabels[%d].cidr is not a valid CIDR", i))
+			} else {
+				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()).Masked()
+				if seen[p] {
+					problems = append(problems, fmt.Sprintf("broker.addressLabels[%d].cidr duplicates an earlier entry", i))
+				}
+				seen[p] = true
+			}
+			if l.Label == "" {
+				problems = append(problems, fmt.Sprintf("broker.addressLabels[%d].label is required", i))
+			} else if len(l.Label) > 64 {
+				problems = append(problems, fmt.Sprintf("broker.addressLabels[%d].label must be at most 64 bytes", i))
+			}
 		}
 	}
 	if s.Clients.Count <= 0 {

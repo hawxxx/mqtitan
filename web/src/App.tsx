@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { AddressDistribution } from "./AddressDistribution";
 import { LatencyPanel } from "./LatencyPanel";
 import { CertificateSettings } from "./CertificateSettings";
 import { LiveLoadControls } from "./LiveLoadControls";
@@ -1529,6 +1530,7 @@ function TestDetail({ id }: { id: string }) {
             )}
           </section>
           {tab === "Latency" && <LatencyPanel snapshot={s} />}
+          <AddressDistribution snapshot={s} samples={metrics.data || []} />
           <div className="two-col">
             <section className="panel side-panel">
               <h2>Connection telemetry</h2>

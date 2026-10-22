@@ -52,6 +52,7 @@ Every snapshot (REST, SSE and JSON export) carries two additive maps that omit z
 
 - `connectFailures` maps a stage to its count: `dns`, `tcp`, `tls_handshake`, `tls_verify_chain`, `tls_verify_hostname`, `tls_alert`, `websocket_upgrade`, `mqtt_connack`, `timeout`, `other`. The counts always sum to `connectErrors`. Timeouts take precedence over every stage except `dns`: a resolver that timed out is a `dns` failure.
 - `connackReasons` maps a decimal CONNACK code (MQTT 3.1.1 return code or MQTT 5 reason code) to its count, for `mqtt_connack` failures.
+- `remoteAddresses`, `addressLabels`, `dnsAnswers` and `dnsErrors` are lists of `{key, label?, connects, active}` rows, sorted by key and bounded to 1024 keys plus an `other` row. `remoteAddresses` keys are `IP:port` of the broker address connected to (`active` is the live connection count); `addressLabels` aggregates them by `broker.addressLabels` (longest CIDR wins, `unlabelled` for no match); `dnsAnswers` keys are resolved IPs (`connects` = times returned); `dnsErrors` keys are resolver `IP:port` (`connects` = failed attempts). `/metrics` exports them for the latest test only as `emqxload_remote_connects_total{address,label}`, `emqxload_remote_active{address,label}`, `emqxload_address_label_active{label}`, `emqxload_dns_answers_total{address}` and `emqxload_dns_errors_total{resolver}`.
 
 In CSV exports the `connect_failures` column is formatted `stage=n;stage=n`. See [Troubleshooting](troubleshooting.md#connect-failure-stages) for the usual cause of each stage.
 

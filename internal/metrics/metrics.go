@@ -4,6 +4,7 @@ import (
 	"errors"
 	hdr "github.com/HdrHistogram/hdrhistogram-go"
 	"math"
+	"net/netip"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -77,6 +78,10 @@ type Counters struct {
 	errors              [len(errorCategories)]atomic.Uint64
 	connectFailures     [len(connectStages)]atomic.Uint64
 	connackReasons      [256]atomic.Uint64
+	remotes             labelSet[netip.AddrPort]
+	dnsAnswers          labelSet[netip.Addr]
+	dnsErrors           labelSet[netip.AddrPort]
+	labelCfg            atomic.Pointer[labelConfig]
 }
 
 // connectStages mirrors the stage constants in internal/mqtt; the last entry
@@ -217,6 +222,10 @@ type Snapshot struct {
 	Errors              map[string]uint64 `json:"errors,omitempty"`
 	ConnectFailures     map[string]uint64 `json:"connectFailures,omitempty"`
 	ConnackReasons      map[string]uint64 `json:"connackReasons,omitempty"`
+	RemoteAddresses     []LabelCount      `json:"remoteAddresses,omitempty"`
+	AddressLabels       []LabelCount      `json:"addressLabels,omitempty"`
+	DNSAnswers          []LabelCount      `json:"dnsAnswers,omitempty"`
+	DNSErrors           []LabelCount      `json:"dnsErrors,omitempty"`
 	ConnectP50          time.Duration     `json:"connectP50"`
 	ConnectP95          time.Duration     `json:"connectP95"`
 	ConnectP99          time.Duration     `json:"connectP99"`
@@ -268,6 +277,7 @@ func (c *Counters) Snapshot() Snapshot {
 			s.ConnackReasons[strconv.Itoa(code)] = n
 		}
 	}
+	c.fillLabels(&s)
 	p, e, k, summary := c.merged()
 	s.PublishLatencyCount = summary.count
 	s.PublishLatencySum = summary.sum
@@ -405,6 +415,10 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 		}
 		out.ConnectFailures = mergeStages(out.ConnectFailures, s.ConnectFailures)
 		out.ConnackReasons = mergeCodes(out.ConnackReasons, s.ConnackReasons)
+		out.RemoteAddresses = mergeLabelCounts(out.RemoteAddresses, s.RemoteAddresses)
+		out.AddressLabels = mergeLabelCounts(out.AddressLabels, s.AddressLabels)
+		out.DNSAnswers = mergeLabelCounts(out.DNSAnswers, s.DNSAnswers)
+		out.DNSErrors = mergeLabelCounts(out.DNSErrors, s.DNSErrors)
 	}
 	p, e, k := histogram(), histogram(), histogram()
 	for _, d := range distributions {
