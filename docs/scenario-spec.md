@@ -67,6 +67,10 @@ Use `wss://load.example.com:443/mqtt` for MQTT over an HTTPS load balancer. `htt
 
 One scenario currently uses one broker URL. A DNS name managed in Route 53 can point to a load balancer distributing new connections across brokers. Long-lived connections remain on their selected backend; this does not guarantee equal load per broker. An explicit list of independent broker URLs is not implemented.
 
+`broker.idleTimeoutHint` (duration, default none) is the load balancer idle timeout. `plan` and `validate` warn when a workload sends nothing for at least the hint (connection, subscriber, or a publisher slower than one message per hint) and the effective `keepAlive` (30s when unset) is not below it.
+
+`safety` holds guardrails: `forbiddenTopicPrefixes` rejects publisher topics and subscriber filters (including wildcard and `$share/` filters, and topics rendered from `${clientId}`) that overlap a prefix; `clientIdDenyRegex` rejects any rendered client ID that matches; `strictSecrets` makes a TLS key file with permissions wider than 0600, or inside a git work tree, an error instead of a warning. Rendered checks run only when needed and render at most `clients.count` IDs.
+
 ## Thresholds and latency interpretation
 
 Supported thresholds are `connection_error_rate`, `message_error_rate` (alias for publish errors), `publish_error_rate`, `subscribe_error_rate`, `publish_latency_p50`, `publish_latency_p95`, `publish_latency_p99`, `connect_latency_p50`, `connect_latency_p95`, `connect_latency_p99`, and `end_to_end_latency_p50`, `end_to_end_latency_p95`, `end_to_end_latency_p99`. End-to-end thresholds require `correlate: true` on a publisher with matching subscribers; connect thresholds require at least one successful connection. Comparisons support `<`, `<=`, `>`, and `>=`. Use percentages for error rates and durations for latency. Missing measurements fail a configured threshold rather than producing a false pass.

@@ -1,16 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/mqtitan/mqtitan/internal/scenario"
 )
 
 func TestQuickRejectsWrappedQoS(t *testing.T) {
@@ -109,5 +114,101 @@ func TestRequestReportsTransportCause(t *testing.T) {
 	err = request(context.Background(), "http://"+address, "GET", "/api/v1/tests", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "controller request failed: ") || !strings.Contains(err.Error(), "refused") {
 		t.Fatalf("error = %v, want transport cause", err)
+	}
+}
+
+const cliScenario = `apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: cli
+broker: {url: 'mqtts://broker.example.com:8883', version: '3.1.1', keepAlive: 180s, idleTimeoutHint: 100s, dns: {resolveEachDial: true, resolvers: ['192.0.2.53:53', '192.0.2.54:53'], pick: random, family: ipv4}, addressLabels: [{cidr: 192.0.2.0/25, label: a}], tls: {hostnameVerification: cn-fallback}}
+clients: {count: 10000, idTemplate: 'c-${sequence:08}'}
+stages: [{duration: 1s, targetClients: 10000}]
+workloads: [{name: idle, type: connection, clients: 10000}]
+safety: {forbiddenTopicPrefixes: ['s1/', 's2/'], clientIdDenyRegex: '^[0-9a-f]{12}$'}
+`
+
+func TestPlanPrintsSafetyDNSAndWarnings(t *testing.T) {
+	s, err := scenario.Parse([]byte(cliScenario))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	printPlan(&out, s, s.Plan())
+	for _, want := range []string{
+		"OK    safety  2 forbidden prefixes, client ID rule checked on 10000 IDs",
+		"dns: resolveEachDial, 2 resolvers, pick random, ipv4",
+		"1 address label",
+		"hostname verification: cn-fallback",
+		"broker.idleTimeoutHint",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("missing %q in:\n%s", want, out.String())
+		}
+	}
+	s.Safety = scenario.Safety{}
+	s.Broker.DNS, s.Broker.AddressLabels = nil, nil
+	out.Reset()
+	printPlan(&out, s, s.Plan())
+	if !strings.Contains(out.String(), "WARN  safety  no forbiddenTopicPrefixes set") || strings.Contains(out.String(), "dns:") {
+		t.Errorf("unexpected:\n%s", out.String())
+	}
+}
+
+func TestValidatePrintsWarningsBeforeValid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.yaml")
+	if err := os.WriteFile(path, []byte(cliScenario), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{path}} {
+		var out bytes.Buffer
+		if err := validateCommand(&out, args); err != nil {
+			t.Fatal(err)
+		}
+		warn, valid := strings.Index(out.String(), "WARN"), strings.Index(out.String(), "VALID cli")
+		if warn < 0 || valid < warn {
+			t.Fatalf("warning must precede VALID:\n%s", out.String())
+		}
+	}
+}
+
+func TestValidateStrictSecretsFailsOnWideKey(t *testing.T) {
+	dir := t.TempDir()
+	key := filepath.Join(dir, "client.key")
+	if err := os.WriteFile(key, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(key, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	y := strings.Replace(cliScenario, "tls: {hostnameVerification: cn-fallback}", "tls: {certFile: "+key+", keyFile: "+key+"}", 1)
+	y = strings.Replace(y, "safety: {", "safety: {strictSecrets: true, ", 1)
+	path := filepath.Join(dir, "s.yaml")
+	if err := os.WriteFile(path, []byte(y), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	err := validateCommand(&out, []string{"--", path})
+	if err == nil || !strings.Contains(err.Error(), "strictSecrets") || !strings.Contains(out.String(), "WARN  secrets  client.key: permissions 0644") || strings.Contains(out.String(), dir) {
+		t.Fatalf("err=%v out=%s", err, out.String())
+	}
+}
+
+func TestPlanCommandFlags(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.yaml")
+	y := strings.Replace(strings.Replace(cliScenario, "count: 10000", "count: 60000", 1), "targetClients: 10000", "targetClients: 60000", 1)
+	y = strings.Replace(y, "clients: 10000}]", "clients: 60000}]", 1)
+	y = strings.Replace(y, ", addressLabels: [{cidr: 192.0.2.0/25, label: a}]", "", 1)
+	if err := os.WriteFile(path, []byte(y), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var one, two bytes.Buffer
+	if err := planCommand(&one, []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := planCommand(&two, []string{"--workers", "3", path}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(one.String(), "source ports") || strings.Contains(two.String(), "source ports") {
+		t.Fatalf("workers flag ignored:\n%s\n---\n%s", one.String(), two.String())
 	}
 }

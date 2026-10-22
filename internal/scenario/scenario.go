@@ -42,6 +42,7 @@ type Scenario struct {
 	Workloads           []Workload        `yaml:"workloads"`
 	Thresholds          map[string]string `yaml:"thresholds,omitempty"`
 	SharedCorrelationID string            `yaml:"correlationRunId,omitempty"`
+	Safety              Safety            `yaml:"safety,omitempty"`
 }
 
 type Broker struct {
@@ -57,6 +58,9 @@ type Broker struct {
 	Reconnect        Reconnect      `yaml:"reconnect,omitempty"`
 	DNS              *DNS           `yaml:"dns,omitempty"`
 	AddressLabels    []AddressLabel `yaml:"addressLabels,omitempty"`
+	// IdleTimeoutHint is the load balancer idle timeout; Plan warns when
+	// keepAlive would not keep an idle connection under it.
+	IdleTimeoutHint Duration `yaml:"idleTimeoutHint,omitempty"`
 }
 
 // AddressLabel names a broker address range for the distribution report.
@@ -252,6 +256,9 @@ func (s Scenario) Validate() error {
 			}
 		}
 	}
+	if s.Broker.IdleTimeoutHint.Duration < 0 {
+		problems = append(problems, "broker.idleTimeoutHint must be nonnegative")
+	}
 	if s.Clients.Count <= 0 {
 		problems = append(problems, "clients.count must be positive")
 	}
@@ -329,6 +336,12 @@ func (s Scenario) Validate() error {
 	if population > s.Clients.Count {
 		problems = append(problems, "workload populations exceed clients.count")
 	}
+	problems = append(problems, s.Safety.check(s)...)
+	if len(problems) == 0 && s.needsRenderCheck() {
+		if err := s.CheckRendered(s.Clients.Worker, s.Clients.SequenceOffset, s.Clients.SequenceOffset+s.Clients.Count); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
 	if len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
@@ -363,7 +376,15 @@ type Plan struct {
 	ChurnConnectsPerSecond float64
 }
 
-func (s Scenario) Plan() Plan {
+// PlanOptions refine Plan with facts only the caller knows.
+type PlanOptions struct {
+	Workers      int // zero means 1
+	Destinations int // resolved broker addresses; zero derives from addressLabels, else 1
+}
+
+func (s Scenario) Plan() Plan { return s.PlanWith(PlanOptions{}) }
+
+func (s Scenario) PlanWith(o PlanOptions) Plan {
 	peak := 0
 	var duration time.Duration
 	for _, st := range s.Stages {
@@ -387,6 +408,10 @@ func (s Scenario) Plan() Plan {
 		if w.Type == "publisher" || w.Type == "mixed" || w.Type == "" {
 			rate += float64(n) * w.RatePerClient
 		}
+	}
+	warnings = append(warnings, s.idleWarnings()...)
+	if w := s.portWarning(peak, o); w != "" {
+		warnings = append(warnings, w)
 	}
 	churn := 0.0
 	if l := s.Clients.Lifetime; l != nil {

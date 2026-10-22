@@ -339,3 +339,38 @@ func TestStreamIncludesRemoteAddresses(t *testing.T) {
 		}
 	}
 }
+
+func TestPlanEndpointAcceptsWorkers(t *testing.T) {
+	_, h := setup(t)
+	y := `apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: big
+broker: {url: 'mqtt://localhost:1883', version: '3.1.1'}
+clients: {count: 60000, idTemplate: 'c-${sequence}'}
+stages: [{duration: 1s, targetClients: 60000}]
+workloads: [{name: idle, type: connection, clients: 60000}]
+`
+	post := func(workers string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"scenario": y})
+		raw := string(body)
+		if workers != "" {
+			raw = strings.TrimSuffix(raw, "}") + `,"workers":` + workers + "}"
+		}
+		r := httptest.NewRequest("POST", "/api/v1/plan", strings.NewReader(raw))
+		r.Header.Set("Authorization", "Bearer controller-secret")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	if w := post(""); w.Code != 200 || !strings.Contains(w.Body.String(), "source ports") {
+		t.Fatalf("default: %d %s", w.Code, w.Body.String())
+	}
+	if w := post("3"); w.Code != 200 || strings.Contains(w.Body.String(), "source ports") {
+		t.Fatalf("workers 3: %d %s", w.Code, w.Body.String())
+	}
+	for _, bad := range []string{"0", "257", "-1"} {
+		if w := post(bad); w.Code != 400 {
+			t.Fatalf("workers %s: %d", bad, w.Code)
+		}
+	}
+}

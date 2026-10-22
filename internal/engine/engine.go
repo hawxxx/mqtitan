@@ -59,7 +59,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		labels = append(labels, l.Label)
 	}
 	e.Metrics.SetAddressLabels(prefixes, labels)
-	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, Seed: e.Scenario.Seed})
+	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, Seed: e.Scenario.Seed, StrictSecrets: e.Scenario.Safety.StrictSecrets})
 	if err != nil {
 		return err
 	}

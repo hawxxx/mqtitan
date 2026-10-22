@@ -32,7 +32,9 @@ type Client interface {
 	RemoteAddr() netip.AddrPort
 }
 
-func TLSConfig(s scenario.TLS) (*tls.Config, error) {
+// TLSConfig builds the client TLS configuration. With strict set (the
+// scenario's safety.strictSecrets) a key file with findings is refused.
+func TLSConfig(s scenario.TLS, strict bool) (*tls.Config, error) {
 	if s.Profile != "" {
 		return nil, errors.New("TLS certificate profile requires its controller; use --controller or provide local PEM files")
 	}
@@ -56,6 +58,9 @@ func TLSConfig(s scenario.TLS) (*tls.Config, error) {
 		c.RootCAs = pool
 	}
 	if s.CertFile != "" || s.KeyFile != "" {
+		if err := checkKeyFile(s.KeyFile, strict); err != nil {
+			return nil, err
+		}
 		cert, err := tls.LoadX509KeyPair(s.CertFile, s.KeyFile)
 		if err != nil {
 			return nil, fmt.Errorf("TLS client certificate: %w", err)
@@ -89,7 +94,7 @@ func NewConnectorWithHooks(b scenario.Broker, h Hooks) (*Connector, error) {
 	if err != nil || u.Host == "" {
 		return nil, errors.New("invalid broker URL")
 	}
-	cfg, err := TLSConfig(b.TLS)
+	cfg, err := TLSConfig(b.TLS, h.StrictSecrets)
 	if err != nil {
 		return nil, err
 	}

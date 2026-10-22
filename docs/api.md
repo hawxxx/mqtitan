@@ -32,7 +32,7 @@ jq -n --rawfile scenario examples/10k.yaml '{scenario: $scenario}' |
     -H 'Content-Type: application/json' --data-binary @-
 ```
 
-The request accepts `scenario` (YAML text) and optional `workers` (worker IDs). Omit workers for local execution. A supplied `scenarioId` selects a saved scenario instead of inline YAML. Save a scenario with `{ "name": "telemetry", "yaml": "YAML text" }`. Planning accepts `{ "scenario": "YAML text" }`.
+The request accepts `scenario` (YAML text) and optional `workers` (worker IDs). Omit workers for local execution. A supplied `scenarioId` selects a saved scenario instead of inline YAML. Save a scenario with `{ "name": "telemetry", "yaml": "YAML text" }`. Planning accepts `{ "scenario": "YAML text", "workers": 1 }`; `workers` is optional (1 to 256, default 1) and sets the worker count used for the source-port warning. The response includes `Warnings` (workloads that never connect, `broker.idleTimeoutHint` and source-port warnings).
 
 Creation returns 201; busy conflicts return 409, invalid requests normally 400, and missing tests 404. Stop returns 202 and cannot restart a finished test. Rerun needs no scenario or secret payload:
 

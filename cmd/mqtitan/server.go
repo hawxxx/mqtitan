@@ -172,7 +172,7 @@ func executeScenario(raw string, o runOptions) error {
 	if err = thresholds.Validate(s.Thresholds); err != nil {
 		return err
 	}
-	printPlan(s)
+	printPlan(os.Stdout, s, s.Plan())
 	ctx, cancel := signalContext()
 	defer cancel()
 	ids := splitWorkers(o.Workers)

@@ -23,6 +23,9 @@ type Hooks struct {
 	OnConnect      func(remote netip.AddrPort)   // after TCP connect succeeds
 	// Seed seeds the address shuffle of broker.dns.pick random.
 	Seed uint64
+	// StrictSecrets is the scenario's safety.strictSecrets: refuse key files
+	// with permission or placement findings.
+	StrictSecrets bool
 }
 
 // resolveAttemptTimeout bounds a single resolver attempt; tests lower it.

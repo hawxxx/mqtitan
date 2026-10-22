@@ -224,8 +224,17 @@ func Handler(m *Manager, opts Options) http.Handler {
 	mux.HandleFunc("POST /api/v1/plan", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Scenario string `json:"scenario"`
+			Workers  *int   `json:"workers"`
 		}
 		if !input(w, r, &body) {
+			return
+		}
+		workers := 1
+		if body.Workers != nil {
+			workers = *body.Workers
+		}
+		if workers < 1 || workers > 256 {
+			writeError(w, 400, "INVALID_REQUEST", "workers must be between 1 and 256")
 			return
 		}
 		s, err := decodeScenario(body.Scenario)
@@ -236,7 +245,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 			writeError(w, 400, "INVALID_SCENARIO", err.Error())
 			return
 		}
-		p := s.Plan()
+		p := s.PlanWith(scenario.PlanOptions{Workers: workers})
 		checks := platform.AssessPlan(platform.PlanInputs{Clients: int64(p.PeakClients), FileDescriptors: int64(p.EstimatedFileDescriptors), MemoryBytes: p.EstimatedMemoryBytes, WireBytesPerSecond: p.EstimatedWireBytesPerSecond}, platform.CurrentCapacity())
 		writeJSON(w, 200, struct {
 			scenario.Plan
