@@ -38,9 +38,6 @@ type Test struct {
 	WorkerIDs    []string            `json:"workerIds"`
 	LostWorkers  []string            `json:"lostWorkers,omitempty"`
 	SourceTestID string              `json:"sourceTestId,omitempty"`
-	// Brokers holds persisted telemetry samples. publicTest strips it; read it
-	// through Manager.Brokers.
-	Brokers []emqx.FleetSample `json:"brokers,omitempty"`
 }
 type Sample struct {
 	Timestamp   time.Time        `json:"timestamp"`
@@ -59,6 +56,7 @@ type Event struct {
 	Data any
 }
 type execution struct {
+	fromAPI     bool
 	ctx         context.Context
 	control     *engine.Control
 	test        Test
@@ -74,16 +72,17 @@ type execution struct {
 	brokers []emqx.FleetSample
 }
 type Manager struct {
-	store   *storage.Store
-	mu      sync.Mutex
-	runs    map[string]*execution
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	closed  bool
-	workers *workerRegistry
-	broker  BrokerTelemetry
-	creds   emqx.Credentials
+	store          *storage.Store
+	mu             sync.Mutex
+	runs           map[string]*execution
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	closed         bool
+	workers        *workerRegistry
+	broker         BrokerTelemetry
+	creds          emqx.Credentials
+	telemetryHosts []string
 	// telemetryEvery overrides the scenario poll interval; tests only.
 	telemetryEvery time.Duration
 }
@@ -157,18 +156,23 @@ func (m *Manager) persist(t Test) error {
 
 func (m *Manager) Start(raw string) (Test, error) { return m.StartOnWorkers(raw, nil) }
 func (m *Manager) StartOnWorkers(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, "", decodeScenario)
+	return m.startTest(raw, workerIDs, "", decodeScenario, true)
 }
 
 // StartLocal starts a scenario supplied by the CLI user who owns this
 // in-process controller; unlike API submissions it may use TLS file paths.
 func (m *Manager) StartLocal(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, "", decodeLocalScenario)
+	return m.startTest(raw, workerIDs, "", decodeLocalScenario, false)
 }
-func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string, decode func(string) (scenario.Scenario, error)) (Test, error) {
+func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string, decode func(string) (scenario.Scenario, error), fromAPI bool) (Test, error) {
 	s, err := decode(raw)
 	if err != nil {
 		return Test{}, err
+	}
+	if fromAPI && s.Telemetry != nil {
+		if err = m.checkTelemetryHosts(*s.Telemetry); err != nil {
+			return Test{}, err
+		}
 	}
 	s, err = m.resolveCertificates(s)
 	if err != nil {
@@ -189,7 +193,7 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 	copy(ids, workerIDs)
 	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, SourceTestID: sourceTestID}
 	counters := metrics.New()
-	r := &execution{ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot}
+	r := &execution{fromAPI: fromAPI, ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot}
 	if len(workerIDs) > 0 {
 		if err := m.assign(r, s, workerIDs); err != nil {
 			cancel()
@@ -273,7 +277,6 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 				m.workers.mu.Unlock()
 			}
 			r.test.Thresholds = results
-			r.test.Brokers = append([]emqx.FleetSample(nil), r.brokers...)
 			r.test.Status = "completed"
 			if ctx.Err() != nil {
 				r.test.Status = "stopped"
@@ -457,7 +460,7 @@ func (m *Manager) Scenarios() ([]SavedScenario, error) {
 	}
 	return out, nil
 }
-func publicTest(t Test) Test { t.Scenario = redact(t.Scenario); t.Brokers = nil; return t }
+func publicTest(t Test) Test { t.Scenario = redact(t.Scenario); return t }
 func redact(raw string) string {
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(raw), &node); err != nil {

@@ -30,6 +30,12 @@ type promResponse struct {
 // credentials or response bodies.
 func fetchPrometheus(ctx context.Context, hc *http.Client, t scenario.Telemetry, c Credentials, s *FleetSample) {
 	p := t.Prometheus
+	if len(c.AllowedHosts) > 0 {
+		if _, ok := HostAllowed(c.AllowedHosts, p.URL); !ok {
+			s.Error = "Prometheus host not allowed"
+			return
+		}
+	}
 	u, err := url.Parse(p.URL)
 	if err != nil || u.Host == "" || u.User != nil {
 		s.Error = "invalid Prometheus URL"

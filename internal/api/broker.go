@@ -3,8 +3,12 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/mqtitan/mqtitan/internal/emqx"
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	"github.com/mqtitan/mqtitan/internal/storage"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -21,6 +25,36 @@ func (m *Manager) SetCredentials(c emqx.Credentials) {
 	m.mu.Unlock()
 }
 
+// SetTelemetryAllowedHosts sets the hosts API-submitted scenarios may poll
+// (comma-separated host or host:port, from MQTITAN_TELEMETRY_ALLOWED_HOSTS).
+func (m *Manager) SetTelemetryAllowedHosts(list string) {
+	m.mu.Lock()
+	m.telemetryHosts = emqx.ParseHostList(list)
+	m.mu.Unlock()
+}
+
+// checkTelemetryHosts rejects API-submitted telemetry that targets a host the
+// operator has not allowlisted, so submitted YAML cannot aim the controller's
+// credentials or network position at arbitrary hosts.
+func (m *Manager) checkTelemetryHosts(t scenario.Telemetry) error {
+	m.mu.Lock()
+	allowed := m.telemetryHosts
+	m.mu.Unlock()
+	urls := make([]string, 0, len(t.EMQX)+1)
+	for _, e := range t.EMQX {
+		urls = append(urls, e.URL)
+	}
+	if t.Prometheus != nil {
+		urls = append(urls, t.Prometheus.URL)
+	}
+	for _, u := range urls {
+		if host, ok := emqx.HostAllowed(allowed, u); !ok {
+			return fmt.Errorf("telemetry host %s is not in MQTITAN_TELEMETRY_ALLOWED_HOSTS", host)
+		}
+	}
+	return nil
+}
+
 // Brokers returns the telemetry samples of a test: live ones while it runs,
 // the persisted ones afterwards.
 func (m *Manager) Brokers(id string) ([]emqx.FleetSample, error) {
@@ -31,18 +65,21 @@ func (m *Manager) Brokers(id string) ([]emqx.FleetSample, error) {
 		return out, nil
 	}
 	m.mu.Unlock()
-	b, err := m.store.Get("tests", id)
+	if _, err := m.Get(id); err != nil {
+		return nil, err
+	}
+	b, err := m.store.Get("brokers", id)
+	if errors.Is(err, storage.ErrNotFound) {
+		return []emqx.FleetSample{}, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	var t Test
-	if err = json.Unmarshal(b, &t); err != nil {
+	var out []emqx.FleetSample
+	if err = json.Unmarshal(b, &out); err != nil {
 		return nil, err
 	}
-	if t.Brokers == nil {
-		t.Brokers = []emqx.FleetSample{}
-	}
-	return t.Brokers, nil
+	return out, nil
 }
 
 // startTelemetry polls the scenario's telemetry source on the controller. With
@@ -52,6 +89,9 @@ func (m *Manager) Brokers(id string) ([]emqx.FleetSample, error) {
 func (m *Manager) startTelemetry(ctx context.Context, r *execution, t scenario.Telemetry) func() {
 	m.mu.Lock()
 	creds, every := m.creds, m.telemetryEvery
+	if r.fromAPI {
+		creds.AllowedHosts = m.telemetryHosts
+	}
 	m.mu.Unlock()
 	if every <= 0 {
 		every = t.PollInterval()
@@ -94,7 +134,19 @@ func (m *Manager) startTelemetry(ctx context.Context, r *execution, t scenario.T
 			record(baseline.Apply(s))
 		}
 	}()
-	return func() { cancel(); wg.Wait() }
+	return func() {
+		cancel()
+		wg.Wait()
+		m.mu.Lock()
+		b, err := json.Marshal(r.brokers)
+		m.mu.Unlock()
+		if err == nil {
+			err = m.store.Put("brokers", r.test.ID, b)
+		}
+		if err != nil {
+			slog.Error("broker sample persistence failed", "test", r.test.ID)
+		}
+	}
 }
 
 type BrokerTelemetry struct {

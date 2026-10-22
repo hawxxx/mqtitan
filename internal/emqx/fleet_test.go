@@ -128,3 +128,24 @@ func TestBaselineFirst(t *testing.T) {
 		t.Fatalf("%+v", low.Targets)
 	}
 }
+
+func TestFleetNeverSendsCredentialsToDisallowedHost(t *testing.T) {
+	var hits atomic.Int64
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1) }))
+	defer s.Close()
+	c := testCreds
+	c.AllowedHosts = []string{"other.example.net"}
+	f := FetchFleet(t.Context(), scenario.Telemetry{EMQX: []scenario.EMQXTarget{{Name: "a", URL: s.URL}}}, c, nil)
+	p := FetchFleet(t.Context(), promTel(s.URL, 0), c, nil)
+	if hits.Load() != 0 || f.Complete || p.Complete {
+		t.Fatalf("hits=%d %+v %+v", hits.Load(), f, p)
+	}
+	for in, want := range map[string]bool{"http://Host.Example.net:9090": true, "http://host.example.net": true, "http://evil.test": false} {
+		if _, ok := HostAllowed([]string{"host.example.net"}, in); ok != want {
+			t.Errorf("%s: %v", in, ok)
+		}
+	}
+	if _, ok := HostAllowed([]string{"host.example.net:9090"}, "http://host.example.net:80"); ok {
+		t.Error("port-specific entry matched another port")
+	}
+}

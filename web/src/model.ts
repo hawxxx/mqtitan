@@ -84,18 +84,18 @@ export interface Test {
   }[];
 }
 export interface TargetSample {
-  Target: string;
-  Zone: string;
-  Connections: number;
-  Raw: number;
-  Error?: string;
+  target: string;
+  zone: string;
+  connections: number;
+  raw: number;
+  error?: string;
 }
 export interface FleetSample {
-  Timestamp: string;
-  Source: "emqx" | "prometheus";
-  Targets: TargetSample[];
-  Complete: boolean;
-  Baseline: boolean;
+  timestamp: string;
+  source: "emqx" | "prometheus";
+  targets: TargetSample[];
+  complete: boolean;
+  baseline: boolean;
   Error?: string;
 }
 export interface Sample {

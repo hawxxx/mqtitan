@@ -45,7 +45,7 @@ curl --fail-with-body -sS \
 curl -N http://127.0.0.1:8080/api/v1/tests/TEST_ID/stream
 ```
 
-SSE types are `status`, `metrics`, `broker` and `heartbeat`. A `broker` event carries one telemetry sample (`Timestamp`, `Source`, `Targets[]`, `Complete`, `Baseline`, optional `Error`) and is sent only for scenarios with a `telemetry` block. Slow consumers can skip snapshots; there is no `Last-Event-ID` replay. Fetch state/history after reconnecting. Lists return at most 1,000 records and metrics retrieval at most 3,600 samples. JSON export contains `data.test` and `data.samples`. Go duration fields serialize as nanoseconds unless a dedicated display field is used.
+SSE types are `status`, `metrics`, `broker` and `heartbeat`. A `broker` event carries one telemetry sample (`timestamp`, `source`, `targets[]` with `target`, `zone`, `connections`, `raw` and optional `error`, `complete`, `baseline`, optional `error`) and is sent only for scenarios with a `telemetry` block. Slow consumers can skip snapshots; there is no `Last-Event-ID` replay. Fetch state/history after reconnecting. Lists return at most 1,000 records and metrics retrieval at most 3,600 samples. JSON export contains `data.test` and `data.samples`. Go duration fields serialize as nanoseconds unless a dedicated display field is used.
 
 ## Connect failure breakdown
 

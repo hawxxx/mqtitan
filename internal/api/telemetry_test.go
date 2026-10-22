@@ -41,6 +41,7 @@ func TestTestTelemetryPolledAndStreamed(t *testing.T) {
 	defer srv.Close()
 	m, h := setup(t)
 	m.SetCredentials(emqx.Credentials{APIKey: "k", APISecret: "s"})
+	m.SetTelemetryAllowedHosts("127.0.0.1")
 	m.telemetryEvery = 50 * time.Millisecond
 	long := strings.Replace(telemetryScenario(srv.URL, "none", ""), "duration: 150ms", "duration: 3s", 1)
 	test, err := m.Start(long)
@@ -93,9 +94,9 @@ func TestTestTelemetryPolledAndStreamed(t *testing.T) {
 	if code, v := get(); code != 200 || len(v) < 2 {
 		t.Fatalf("persisted: %d %d samples", code, len(v))
 	}
-	b, _ := json.Marshal(mustGet(t, m, test.ID))
-	if strings.Contains(string(b), "brokers") {
-		t.Fatal("samples leaked into public test record")
+	raw, err := m.store.Get("tests", test.ID)
+	if err != nil || strings.Contains(string(raw), `"complete"`) || strings.Contains(string(raw), `"brokers"`) {
+		t.Fatalf("samples stored on the test record (%v)", err)
 	}
 	r := httptest.NewRequest("GET", "/api/v1/tests/missing/brokers", nil)
 	r.Header.Set("Authorization", "Bearer controller-secret")
@@ -104,15 +105,6 @@ func TestTestTelemetryPolledAndStreamed(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatalf("missing: %d", w.Code)
 	}
-}
-
-func mustGet(t *testing.T, m *Manager, id string) Test {
-	t.Helper()
-	v, err := m.Get(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return v
 }
 
 func TestBaselineSampleTakenBeforeEngineStarts(t *testing.T) {
@@ -141,6 +133,7 @@ func TestBaselineSampleTakenBeforeEngineStarts(t *testing.T) {
 	defer srv.Close()
 	m, _ = setup(t)
 	m.SetCredentials(emqx.Credentials{APIKey: "k", APISecret: "s"})
+	m.SetTelemetryAllowedHosts("127.0.0.1")
 	m.telemetryEvery = 50 * time.Millisecond
 	long := strings.Replace(telemetryScenario(srv.URL, "first", ""), "duration: 150ms", "duration: 2s", 1)
 	test, err := m.Start(long)
@@ -159,4 +152,55 @@ func TestBaselineSampleTakenBeforeEngineStarts(t *testing.T) {
 	if c := v[1].Targets[0]; c.Raw != 200 || c.Connections != 100 {
 		t.Fatalf("baseline not subtracted: %+v", c)
 	}
+}
+
+func TestAPITelemetryHostAllowlist(t *testing.T) {
+	var hits atomic.Int64
+	var auth atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		auth.Store(r.Header.Get("Authorization"))
+		_, _ = w.Write([]byte(`[{"node":"n","live_connections":1}]`))
+	}))
+	defer srv.Close()
+	raw := strings.Replace(telemetryScenario(srv.URL, "none", ""), "duration: 150ms", "duration: 2s", 1)
+
+	m, _ := setup(t)
+	m.SetCredentials(emqx.Credentials{APIKey: "k", APISecret: "s"})
+	// Empty allowlist rejects API submissions.
+	if _, err := m.Start(raw); err == nil || !strings.Contains(err.Error(), "is not in MQTITAN_TELEMETRY_ALLOWED_HOSTS") {
+		t.Fatalf("empty allowlist: %v", err)
+	}
+	m.SetTelemetryAllowedHosts("other.example.net, 127.0.0.2")
+	if _, err := m.Start(raw); err == nil || !strings.Contains(err.Error(), "telemetry host 127.0.0.1:") {
+		t.Fatalf("other host: %v", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if hits.Load() != 0 {
+		t.Fatal("rejected scenario contacted the telemetry server")
+	}
+	// Allowlisted host is accepted and receives credentials.
+	m.SetTelemetryAllowedHosts("127.0.0.1")
+	test, err := m.Start(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "request", func() bool { return hits.Load() > 0 })
+	if a, _ := auth.Load().(string); !strings.HasPrefix(a, "Basic ") {
+		t.Fatalf("auth %q", a)
+	}
+	_ = m.Stop(test.ID)
+	waitFor(t, "stop", func() bool { v, _ := m.Get(test.ID); return v.Status != "running" })
+
+	// Local runs are exempt from the allowlist.
+	m2, _ := setup(t)
+	m2.SetCredentials(emqx.Credentials{APIKey: "k", APISecret: "s"})
+	before := hits.Load()
+	local, err := m2.StartLocal(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "local request", func() bool { return hits.Load() > before })
+	_ = m2.Stop(local.ID)
+	waitFor(t, "local stop", func() bool { v, _ := m2.Get(local.ID); return v.Status != "running" })
 }

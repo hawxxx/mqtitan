@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,27 +21,59 @@ const (
 
 // TargetSample is one broker target's connection count at a point in time.
 type TargetSample struct {
-	Target      string
-	Zone        string
-	Connections float64 // after baseline subtraction, clamped at 0
-	Raw         float64 // as reported
-	Error       string  `json:",omitempty"`
+	Target      string  `json:"target"`
+	Zone        string  `json:"zone"`
+	Connections float64 `json:"connections"` // after baseline subtraction, clamped at 0
+	Raw         float64 `json:"raw"`         // as reported
+	Error       string  `json:"error,omitempty"`
 }
 
 // FleetSample is one poll of every telemetry target. Source is "emqx" or
 // "prometheus". Error describes source-level problems (query failure, fewer
 // targets than expected); per-target problems are on the TargetSample.
 type FleetSample struct {
-	Timestamp time.Time
-	Source    string
-	Targets   []TargetSample
-	Complete  bool
-	Baseline  bool
-	Error     string `json:",omitempty"`
+	Timestamp time.Time      `json:"timestamp"`
+	Source    string         `json:"source"`
+	Targets   []TargetSample `json:"targets"`
+	Complete  bool           `json:"complete"`
+	Baseline  bool           `json:"baseline"`
+	Error     string         `json:"error,omitempty"`
 }
 
 // Credentials come from controller environment variables, never from YAML.
-type Credentials struct{ APIKey, APISecret, PromToken, PromUser, PromPassword string }
+type Credentials struct {
+	APIKey, APISecret, PromToken, PromUser, PromPassword string
+	// AllowedHosts, when non-empty, restricts which hosts receive requests (and
+	// therefore credentials). Entries are host or host:port, case-insensitive.
+	AllowedHosts []string
+}
+
+// ParseHostList splits a comma-separated allowlist, dropping empty entries.
+func ParseHostList(v string) []string {
+	var out []string
+	for _, h := range strings.Split(v, ",") {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// HostAllowed reports the URL's host and whether the allowlist permits it. A
+// bare allowlist hostname matches any port; host:port entries match exactly.
+func HostAllowed(allowed []string, rawURL string) (string, bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return "", false
+	}
+	hp, h := strings.ToLower(u.Host), strings.ToLower(u.Hostname())
+	for _, a := range allowed {
+		if a == hp || a == h {
+			return u.Host, true
+		}
+	}
+	return u.Host, false
+}
 
 // FetchFleet polls the single configured telemetry source. It never follows
 // redirects, caps response sizes and bounds every request by min(interval/2, 5s).
@@ -89,6 +123,13 @@ func fetchEMQX(ctx context.Context, hc *http.Client, t scenario.Telemetry, c Cre
 			defer wg.Done()
 			defer func() { <-sem }()
 			ts := TargetSample{Target: tg.Name, Zone: tg.Zone}
+			if len(c.AllowedHosts) > 0 {
+				if _, ok := HostAllowed(c.AllowedHosts, tg.URL); !ok {
+					ts.Error = "host not allowed"
+					s.Targets[i] = ts
+					return
+				}
+			}
 			client := &Client{BaseURL: tg.URL, APIKey: c.APIKey, APISecret: c.APISecret, HTTPClient: hc, MaxResponseBytes: maxResponseBytes}
 			snap, err := client.Fetch(ctx)
 			// Fetch joins a metrics-endpoint error even when nodes succeeded.
