@@ -1199,9 +1199,6 @@ textarea:focus {
 [data-theme="light"] .yaml-read {
   color: #226e5b;
 }
-[data-theme="light"] .brand-symbol {
-  background: #daf1e9;
-}
 [data-theme="light"] nav a.active {
   background: #daf1e9;
   color: #216d5a;
@@ -1380,7 +1377,7 @@ textarea:focus {
     padding: 20px 5px;
   }
   .brand-symbol {
-    width: 32px;
+    width: auto;
     height: 36px;
   }
   .main-column {
