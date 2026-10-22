@@ -65,6 +65,20 @@ func (b *Balance) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+func total(g []Group) (sum float64) {
+	for _, x := range g {
+		sum += x.Connections
+	}
+	return
+}
+
+// CVObserved reports whether TargetCV is meaningful: at least two targets
+// holding connections. An all-zero fleet has no observable balance.
+func (b Balance) CVObserved() bool { return len(b.Targets) >= 2 && total(b.Targets) > 0 }
+
+// SkewObserved reports whether ZoneSkew is meaningful.
+func (b Balance) SkewObserved() bool { return len(b.Zones) >= 2 && total(b.Zones) > 0 }
+
 func groupsOf(m map[string]float64) []Group {
 	out := make([]Group, 0, len(m))
 	for k, v := range m {
@@ -135,7 +149,8 @@ func ComputeBalance(s FleetSample) Balance {
 }
 
 // PeakBalance returns the balance of the non-baseline sample with the highest
-// total connections.
+// total connections. Complete is false when any later (or simultaneous)
+// non-baseline sample was incomplete.
 func PeakBalance(samples []FleetSample) (Balance, bool) {
 	best, found := -1, false
 	var bestTotal float64
@@ -156,5 +171,12 @@ func PeakBalance(samples []FleetSample) (Balance, bool) {
 	if !found {
 		return Balance{}, false
 	}
-	return ComputeBalance(samples[best]), true
+	b := ComputeBalance(samples[best])
+	// A telemetry failure at or after the peak means the peak cannot be trusted.
+	for _, s := range samples {
+		if !s.Baseline && !s.Complete && !s.Timestamp.Before(samples[best].Timestamp) {
+			b.Complete = false
+		}
+	}
+	return b, true
 }

@@ -17,6 +17,7 @@ function Bars({ title, groups }: { title: string; groups: BalanceGroup[] }) {
   );
 }
 
+const sumOf = (g: BalanceGroup[]) => g.reduce((a, x) => a + x.connections, 0);
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
 const ratio = (v: number | null) => (v == null ? "∞" : v.toFixed(2));
 
@@ -62,6 +63,7 @@ export function liveBalance(samples: FleetSample[] | undefined): Balance | undef
 export function BalancePanel({ balance }: { balance?: Balance }) {
   if (!balance) return null;
   const hasZones = balance.zones.length > 0;
+  const cvSeen = balance.targets.length >= 2 && sumOf(balance.targets) > 0;
   return (
     <section className="panel balance-panel">
       <h2>Broker balance</h2>
@@ -71,9 +73,17 @@ export function BalancePanel({ balance }: { balance?: Balance }) {
         </div>
       )}
       <div className="balance-tiles">
-        <strong>CV {pct(balance.targetCV)}</strong>
-        <strong>Max/min {ratio(balance.targetRatio)}</strong>
-        {hasZones && <strong>Zone skew {pct(balance.zoneSkew)}</strong>}
+        {cvSeen ? (
+          <>
+            <strong>CV {pct(balance.targetCV)}</strong>
+            <strong>Max/min {ratio(balance.targetRatio)}</strong>
+          </>
+        ) : (
+          <strong>No observations</strong>
+        )}
+        {hasZones && (
+          <strong>Zone skew {sumOf(balance.zones) > 0 && balance.zones.length >= 2 ? pct(balance.zoneSkew) : "—"}</strong>
+        )}
       </div>
       <Bars title="Connections per target" groups={balance.targets} />
       {hasZones ? (

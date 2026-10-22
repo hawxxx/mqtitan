@@ -246,7 +246,8 @@ func TestBalanceThresholdUsesPeakSample(t *testing.T) {
 func TestPrometheusBalanceSeries(t *testing.T) {
 	m, h := setup(t)
 	old := Test{ID: "old", Name: "o", Status: "completed", StartedAt: time.Now().Add(-time.Hour)}
-	cur := Test{ID: "cur", Name: "c", Status: "completed", StartedAt: time.Now(), Balance: &emqx.Balance{Complete: false, TargetCV: 0.25, ZoneSkew: 0.5}}
+	cur := Test{ID: "cur", Name: "c", Status: "completed", StartedAt: time.Now(), Balance: &emqx.Balance{Complete: false, TargetCV: 0.25, ZoneSkew: 0.5,
+		Targets: []emqx.Group{{Key: "e0", Connections: 1}, {Key: "e1", Connections: 3}}, Zones: []emqx.Group{{Key: "a", Connections: 1}, {Key: "b", Connections: 3}}}}
 	for _, x := range []Test{old, cur} {
 		if err := m.persist(x); err != nil {
 			t.Fatal(err)
@@ -276,5 +277,27 @@ func TestPrometheusBalanceSeries(t *testing.T) {
 	}
 	if strings.Contains(body, "999") || strings.Contains(body, `target=""`) {
 		t.Fatal("baseline or errored target exported")
+	}
+}
+
+func TestPrometheusOmitsUndefinedBalance(t *testing.T) {
+	m, h := setup(t)
+	if err := m.persist(Test{ID: "zero", Name: "z", Status: "completed", StartedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal([]emqx.FleetSample{{Complete: true, Targets: []emqx.TargetSample{{Target: "e0", Connections: 0}, {Target: "e1", Connections: 0}}}})
+	if err := m.store.Put("brokers", "zero", b); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	body := w.Body.String()
+	if strings.Contains(body, "emqxload_broker_connection_cv") || strings.Contains(body, "emqxload_zone_connection_skew_ratio") {
+		t.Fatal(body)
+	}
+	if !strings.Contains(body, "emqxload_broker_telemetry_complete 1\n") {
+		t.Fatal(body)
 	}
 }

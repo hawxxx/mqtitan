@@ -186,8 +186,10 @@ func (m *Manager) writeBalanceSeries(w io.Writer, t Test) {
 			balance = &peak
 		}
 	}
-	if balance != nil {
+	if balance != nil && balance.CVObserved() {
 		fmt.Fprintf(w, "# TYPE emqxload_broker_connection_cv gauge\nemqxload_broker_connection_cv %g\n", balance.TargetCV)
+	}
+	if balance != nil && balance.SkewObserved() {
 		fmt.Fprintf(w, "# TYPE emqxload_zone_connection_skew_ratio gauge\nemqxload_zone_connection_skew_ratio %g\n", balance.ZoneSkew)
 	}
 	fmt.Fprintf(w, "# TYPE emqxload_broker_telemetry_complete gauge\nemqxload_broker_telemetry_complete %d\n", complete)

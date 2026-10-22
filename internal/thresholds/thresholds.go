@@ -113,12 +113,12 @@ func Evaluate(input map[string]string, s metrics.Snapshot, b *emqx.Balance) ([]R
 				value = float64(s.SubscribeErrors) / float64(attempts)
 			}
 		case "broker_connection_cv":
-			valid = b != nil && (len(b.Targets) >= 2 || !b.Complete)
+			valid = b != nil && (!b.Complete || b.CVObserved())
 			if valid {
 				value = b.TargetCV
 			}
 		case "zone_connection_skew":
-			valid = b != nil && (len(b.Zones) >= 2 || !b.Complete)
+			valid = b != nil && (!b.Complete || b.SkewObserved())
 			if valid {
 				value = b.ZoneSkew
 			}

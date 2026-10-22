@@ -140,3 +140,38 @@ func TestBalancePercentMayExceed100(t *testing.T) {
 		t.Fatal("balance threshold must be a percentage")
 	}
 }
+
+func TestBalanceThresholdAllZeroFleetHasNoObservations(t *testing.T) {
+	in := map[string]string{"broker_connection_cv": "<10%", "zone_connection_skew": "<=20%"}
+	b := &emqx.Balance{Complete: true,
+		Targets: []emqx.Group{{Key: "a"}, {Key: "b"}}, Zones: []emqx.Group{{Key: "x"}, {Key: "y"}}, TargetRatio: 1, ZoneRatio: 1}
+	r, _ := Evaluate(in, metrics.Snapshot{}, b)
+	for _, x := range r {
+		if x.Passed || x.Observed != "no observations" {
+			t.Fatalf("%+v", x)
+		}
+	}
+}
+
+func TestBalanceThresholdFailsWhenTelemetryFailsAtPeak(t *testing.T) {
+	at := func(m int) time.Time { return time.Unix(int64(m), 0) }
+	sample := func(m int, complete bool, a, b float64) emqx.FleetSample {
+		return emqx.FleetSample{Timestamp: at(m), Complete: complete, Targets: []emqx.TargetSample{{Target: "a", Connections: a}, {Target: "b", Connections: b}}}
+	}
+	in := map[string]string{"broker_connection_cv": "<10%"}
+	bad := sample(2, false, 300, 0)
+	bad.Targets[1] = emqx.TargetSample{Target: "b", Error: "boom"}
+	b, ok := emqx.PeakBalance([]emqx.FleetSample{sample(1, true, 200, 200), bad})
+	if !ok || b.Complete {
+		t.Fatalf("%v %+v", ok, b)
+	}
+	r, _ := Evaluate(in, metrics.Snapshot{}, &b)
+	if r[0].Passed || r[0].Observed != "incomplete broker telemetry" {
+		t.Fatalf("%+v", r)
+	}
+	early := sample(1, false, 10, 10)
+	b, _ = emqx.PeakBalance([]emqx.FleetSample{early, sample(2, true, 200, 200)})
+	if !b.Complete {
+		t.Fatalf("%+v", b)
+	}
+}

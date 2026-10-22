@@ -41,6 +41,16 @@ describe("BalancePanel", () => {
     expect(screen.getByText(/zone labels missing/i)).toBeTruthy();
     expect(screen.getByText("Max/min ∞")).toBeTruthy();
   });
+  it("shows no observations for an all-zero fleet", () => {
+    render(
+      <BalancePanel
+        balance={balance({ targets: [{ key: "a", connections: 0 }, { key: "b", connections: 0 }], zones: [{ key: "z", connections: 0 }] })}
+      />,
+    );
+    expect(screen.getByText("No observations")).toBeTruthy();
+    expect(screen.queryByText(/CV 0/)).toBeNull();
+    expect(screen.getByText("Zone skew —")).toBeTruthy();
+  });
   it("renders nothing without balance data", () => {
     const { container } = render(<BalancePanel balance={undefined} />);
     expect(container.textContent).toBe("");
