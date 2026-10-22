@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	"github.com/mqtitan/mqtitan/internal/thresholds"
 )
 
 func TestQuickRejectsWrappedQoS(t *testing.T) {
@@ -246,5 +247,29 @@ func TestValidateStrictScopeIsKeyFileOnly(t *testing.T) {
 	err := validateCommand(&out, []string{write("certFile: " + gitKey + ", keyFile: " + gitKey)})
 	if err == nil || !strings.HasPrefix(err.Error(), "refusing key file client.key: file is inside a git work tree") || !strings.HasSuffix(err.Error(), "(safety.strictSecrets)") {
 		t.Fatalf("key: %v", err)
+	}
+}
+
+func TestExamplesValidate(t *testing.T) {
+	files, err := filepath.Glob("../../examples/*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, f := range files {
+		if filepath.Base(f) == "nlb-balance.yaml" {
+			found = true
+		}
+		s, err := scenario.Load(f)
+		if err != nil {
+			t.Errorf("%s: %v", f, err)
+			continue
+		}
+		if err := thresholds.Validate(s.Thresholds); err != nil {
+			t.Errorf("%s: thresholds: %v", f, err)
+		}
+	}
+	if !found {
+		t.Fatalf("examples/nlb-balance.yaml missing among %d examples", len(files))
 	}
 }

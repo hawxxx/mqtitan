@@ -1,0 +1,85 @@
+# End-to-end proof for broker balance telemetry. Three standalone EMQX brokers
+# share the Docker DNS alias "broker"; Prometheus scrapes each broker with
+# static pod/zone labels. Run with ./run.sh.
+name: mqtitan-balance
+
+x-broker: &broker
+  image: emqx/emqx:5.8.8@sha256:4593b6e30196754779fa14483332cb0be56c233f1c8a387b1308bec4337c0144
+  healthcheck:
+    test: ["CMD", "/opt/emqx/bin/emqx", "ctl", "status"]
+    interval: 5s
+    timeout: 5s
+    retries: 24
+    start_period: 10s
+
+services:
+  broker-a:
+    <<: *broker
+    hostname: broker-a
+    networks:
+      lab:
+        ipv4_address: 172.28.77.11
+        aliases: [broker]
+  broker-b:
+    <<: *broker
+    hostname: broker-b
+    networks:
+      lab:
+        ipv4_address: 172.28.77.12
+        aliases: [broker]
+  broker-c:
+    <<: *broker
+    hostname: broker-c
+    networks:
+      lab:
+        ipv4_address: 172.28.77.13
+        aliases: [broker]
+
+  prometheus:
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=1h
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      broker-a: {condition: service_healthy}
+      broker-b: {condition: service_healthy}
+      broker-c: {condition: service_healthy}
+    networks:
+      lab: {}
+
+  # Controller that executes the tests locally (no workers). It polls
+  # Prometheus, so Prometheus must be on the telemetry allowlist.
+  controller:
+    build:
+      context: ../../..
+    image: ${MQTITAN_IMAGE:-mqtitan:local}
+    command: ["serve", "--listen", "0.0.0.0:8080", "--data", "/data/mqtitan.db"]
+    environment:
+      MQTITAN_TOKEN: lab-only-token
+      MQTITAN_TELEMETRY_ALLOWED_HOSTS: prometheus
+    depends_on:
+      prometheus: {condition: service_started}
+    networks:
+      lab: {}
+
+  # CLI client: docker compose run --rm mqtitan run /e2e/<scenario>.yaml
+  mqtitan:
+    image: ${MQTITAN_IMAGE:-mqtitan:local}
+    entrypoint: ["mqtitan"]
+    environment:
+      MQTITAN_CONTROLLER: http://controller:8080
+      MQTITAN_TOKEN: lab-only-token
+    volumes:
+      - ./:/e2e:ro
+    depends_on:
+      controller: {condition: service_started}
+    networks:
+      lab: {}
+
+networks:
+  lab:
+    ipam:
+      config:
+        - subnet: 172.28.77.0/24

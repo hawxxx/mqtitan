@@ -1,0 +1,26 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Brokers with pod and zone labels.
+  - job_name: zoned
+    metrics_path: /api/v5/prometheus/stats
+    static_configs:
+      - targets: ["broker-a:18083"]
+        labels: {pod: broker-a, zone: z1}
+      - targets: ["broker-b:18083"]
+        labels: {pod: broker-b, zone: z1}
+      - targets: ["broker-c:18083"]
+        labels: {pod: broker-c, zone: z2}
+  # The same brokers with no zone label, to prove zone_connection_skew fails
+  # with "no observations" instead of passing.
+  - job_name: nozone
+    metrics_path: /api/v5/prometheus/stats
+    static_configs:
+      - targets: ["broker-a:18083"]
+        labels: {pod: broker-a}
+      - targets: ["broker-b:18083"]
+        labels: {pod: broker-b}
+      - targets: ["broker-c:18083"]
+        labels: {pod: broker-c}

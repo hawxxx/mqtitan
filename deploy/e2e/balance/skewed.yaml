@@ -1,0 +1,43 @@
+# Resolves once and caches, so every connection goes to one broker IP. Docker DNS shuffles
+# alias answers, so pick: first with resolveEachDial: true would look balanced.
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: balance-skewed
+broker:
+  url: mqtt://broker:1883
+  version: "3.1.1"
+  connectTimeout: 10s
+  keepAlive: 30s
+  cleanStart: true
+  dns:
+    resolveEachDial: false
+    pick: first
+    resolvers: ["127.0.0.11:53"]
+  addressLabels:
+    - cidr: 172.28.77.0/24
+      label: lab
+clients:
+  count: 150
+  idTemplate: balance-skewed-${sequence:06}
+  lifetime:
+    min: 20s
+    max: 40s
+stages:
+  - duration: 10s
+    targetClients: 150
+  - duration: 1m50s
+    targetClients: 150
+workloads:
+  - name: connections
+    type: connection
+    clients: 150
+telemetry:
+  interval: 5s
+  expectedTargets: 3
+  baseline: first
+  prometheus:
+    url: http://prometheus:9090
+    query: 'sum by (pod, zone) (emqx_live_connections_count{job="zoned"})'
+thresholds:
+  connection_error_rate: "<1%"
+  broker_connection_cv: "<10%"
