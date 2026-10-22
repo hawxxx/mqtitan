@@ -7,6 +7,11 @@ broker:
   connectTimeout: 10s
   keepAlive: 30s
   cleanStart: true
+  reconnect:
+    enabled: true
+    maxAttempts: 5
+    initialBackoff: 200ms
+    maxBackoff: 2s
   dns:
     resolveEachDial: true
     pick: random

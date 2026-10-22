@@ -4,7 +4,7 @@
 # repository root unless MQTITAN_IMAGE names an existing image.
 set -uo pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 compose=(docker compose -f compose.yaml)
 fail=0
 
@@ -88,8 +88,8 @@ fi
 run_scenario skewed
 if [ "$code" = 0 ]; then
   bad skewed-fails "expected non-zero exit"
-elif [ -z "$(observed broker_connection_cv)" ]; then
-  bad skewed-fails "broker_connection_cv did not fail"
+elif ! awk -v v="$(observed broker_connection_cv)" 'BEGIN { exit !(v ~ /^[0-9.]+%$/ && v + 0 > 10) }'; then
+  bad skewed-fails "broker_connection_cv observed '$(observed broker_connection_cv)', want a percentage above 10"
 else
   echo "  broker_connection_cv observed: $(observed broker_connection_cv)"
   pass skewed-fails

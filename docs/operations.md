@@ -82,7 +82,7 @@ Do not expose EMQX development dashboard ports to public networks. The container
 
 ## Source ports and idle timeouts
 
-When testing through a network load balancer, each worker source IP has about 28,000 ephemeral ports per destination `IP:port`, and a proxy idle timeout can drop connections that only send keepalives. Plan with `mqtitan plan --workers N --resolve` and read [scenario-spec](scenario-spec.md#secure-websocket-endpoints) for `broker.idleTimeoutHint`, `keepAlive` and the source-port warning. The `examples/nlb-balance.yaml` scenario and `deploy/e2e/balance/run.sh` show a complete setup.
+When testing through a network load balancer, each worker source IP has about 28,000 ephemeral ports per destination `IP:port`, and a proxy idle timeout can drop connections that only send keepalives. Plan with `mqtitan plan --workers N --resolve` and read [scenario-spec](scenario-spec.md#idle-timeouts-and-source-ports) for `broker.idleTimeoutHint`, `keepAlive` and the source-port warning. The `examples/nlb-balance.yaml` scenario and `deploy/e2e/balance/run.sh` show a complete setup.
 
 ## Linux worker sizing
 
