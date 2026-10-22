@@ -1,6 +1,6 @@
 {
-  "name": "MQTitan",
-  "short_name": "MQTitan",
+  "name": "MQTiTan",
+  "short_name": "MQTiTan",
   "description": "MQTT performance lab",
   "start_url": "/",
   "display": "standalone",

@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="docs/brand/mqtitan-logo-horizontal.png" alt="MQTitan" width="480">
+  <img src="docs/brand/mqtitan-logo-horizontal.png" alt="MQTiTan" width="480">
 </p>
 
-# MQTTitan
+# MQTiTan
 
-![MQTTitan dashboard during a live run](docs/images/dashboard.png)
+![MQTiTan dashboard during a live run](docs/images/dashboard.png)
 
-MQTTitan is an open-source MQTT load-testing platform for EMQX and standards-compatible brokers, with a Go CLI/controller and a React operations dashboard. This is a working engineering preview, not a certified production release.
+MQTiTan is an open-source MQTT load-testing platform for EMQX and standards-compatible brokers, with a Go CLI/controller and a React operations dashboard. This is a working engineering preview, not a certified production release.
 
 ## Quick start
 

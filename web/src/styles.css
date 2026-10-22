@@ -12,6 +12,7 @@
   --text: #dce6e9;
   --muted: #97a9b3;
   --teal: #39c7b0;
+  --silver: #d3dadd;
   --amber: #e4b467;
   --field: #0c1418;
   --hover: #1b282e;
@@ -208,8 +209,11 @@ pre,
   color: var(--muted);
   margin-top: 4px;
 }
-.brand-accent {
+.wordmark {
   color: var(--teal);
+}
+.wordmark .silver {
+  color: var(--silver);
 }
 .workspace {
   display: flex;
@@ -635,6 +639,7 @@ nav a.active:before {
 }
 [data-theme="light"] {
   --teal: #087b69;
+  --silver: #8d999f;
   --muted: #526871;
 }
 [data-theme="light"] button.primary {

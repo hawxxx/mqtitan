@@ -514,4 +514,4 @@ func (m *Manager) RawScenario(id string) (string, error) {
 	}
 	return s.YAML, nil
 }
-func (m *Manager) Description() string { return fmt.Sprintf("MQTTitan controller") }
+func (m *Manager) Description() string { return fmt.Sprintf("MQTiTan controller") }
