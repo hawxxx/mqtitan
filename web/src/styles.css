@@ -1369,7 +1369,8 @@ textarea:focus {
   .topbar {
     padding: 0 15px;
   }
-  .breadcrumb strong {
+  .breadcrumb strong,
+  .breadcrumb svg {
     display: none;
   }
   .topbar-actions {
@@ -3474,4 +3475,16 @@ input[hidden] {
 }
 .modal {
   scrollbar-width: thin;
+}
+/* Reduced motion drops the rise, scale and blur but keeps a short fade, so
+   opening and closing a dialog still reads as a change of state. */
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal {
+    animation: fade-in 160ms ease backwards !important;
+  }
+  .modal-backdrop.leaving,
+  .modal-backdrop.leaving .modal {
+    animation: fade-out 160ms ease forwards !important;
+  }
 }

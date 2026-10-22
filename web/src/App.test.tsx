@@ -14,8 +14,7 @@ import {
 } from "./App";
 import userEvent from "@testing-library/user-event";
 import { parse } from "yaml";
-// Reduced motion makes the wizard close synchronously; one test below covers
-// the animated exit.
+// Reduced motion keeps a short fade, so wizard callbacks still arrive async.
 const motion = (reduce: boolean) =>
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: reduce && query.includes("reduce"),
@@ -89,6 +88,7 @@ it("lets the wizard select a certificate profile for secure WebSocket tests", as
   await userEvent.click(
     screen.getByRole("button", { name: "Review scenario" }),
   );
+  await waitFor(() => expect(output).not.toBe(""));
   expect(parse(output).broker.tls).toEqual({
     profile: "saved-tls-profile",
     serverName: "mqtt.example.com",
@@ -117,6 +117,7 @@ it("creates a scenario from wizard inputs and presents YAML for review", async (
   await userEvent.click(
     screen.getByRole("button", { name: "Review scenario" }),
   );
+  await waitFor(() => expect(output).not.toBe(""));
   expect(output).toContain("mqtitan.io/v1alpha1");
   expect(output).toContain("mqtt://localhost:1883");
 });
@@ -209,15 +210,14 @@ it("shows actual EMQX connection and delivery metrics when configured", async ()
     globalThis.fetch = original;
   }
 });
-it("closes the wizard on Escape and records MQTT version and payload size", async () => {
+it("records MQTT version and payload size from the wizard", async () => {
   let output = "";
-  const close = vi.fn();
   render(
     <Wizard
       done={(s) => {
         output = s;
       }}
-      close={close}
+      close={() => {}}
     />,
   );
   await userEvent.selectOptions(screen.getByLabelText("MQTT version"), "5");
@@ -227,11 +227,16 @@ it("closes the wizard on Escape and records MQTT version and payload size", asyn
   await userEvent.click(
     screen.getByRole("button", { name: "Review scenario" }),
   );
+  await waitFor(() => expect(output).not.toBe(""));
   const doc = parse(output);
   expect(doc.broker.version).toBe("5");
   expect(doc.workloads[0].payload.size).toBe(1024);
+});
+it("closes the wizard on Escape", async () => {
+  const close = vi.fn();
+  render(<Wizard done={() => {}} close={close} />);
   await userEvent.keyboard("{Escape}");
-  expect(close).toHaveBeenCalled();
+  await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
 });
 it("moves focus into the wizard and keeps Tab inside it", async () => {
   const opener = document.createElement("button");
@@ -239,13 +244,15 @@ it("moves focus into the wizard and keeps Tab inside it", async () => {
   opener.focus();
   const { unmount } = render(<Wizard done={() => {}} close={() => {}} />);
   const dialog = screen.getByRole("dialog");
-  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(document.activeElement).toBe(screen.getByLabelText("Test name"));
+  expect(document.body.style.overflow).toBe("hidden");
   for (let i = 0; i < 30; i++) {
     await userEvent.tab();
     expect(dialog.contains(document.activeElement)).toBe(true);
   }
   unmount();
   expect(document.activeElement).toBe(opener);
+  expect(document.body.style.overflow).toBe("");
   opener.remove();
 });
 

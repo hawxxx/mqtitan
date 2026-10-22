@@ -49,6 +49,7 @@ function reasons(
 export function deriveConsoleLines(
   samples: Sample[],
   startedAt: string,
+  finished = false,
 ): ConsoleLine[] {
   const out: ConsoleLine[] = [];
   const start = Date.parse(startedAt);
@@ -94,6 +95,7 @@ export function deriveConsoleLines(
           ],
           reconnect: ["warn", "reconnects"],
           disconnect: ["warn", "disconnects"],
+          closed: ["info", "clients closed at test end"],
         } as Record<string, [ConsoleLevel, string]>
       )[kind];
       add(
@@ -104,8 +106,11 @@ export function deriveConsoleLines(
       pending.delete(kind);
     }
   };
-  for (const sample of samples) {
+  for (const [i, sample] of samples.entries()) {
     const s = sample.snapshot;
+    // A finished run's last sample holds the shutdown drain, which is
+    // expected rather than a warning.
+    const closing = finished && i === samples.length - 1;
     const time = Date.parse(sample.timestamp);
     if (s.targetClients !== target) {
       target = s.targetClients;
@@ -135,6 +140,7 @@ export function deriveConsoleLines(
     if (prev) {
       const drop = prev.connected - s.connected;
       if (
+        !closing &&
         drop > Math.max(10, prev.connected * 0.01) &&
         s.targetClients >= prev.targetClients
       )
@@ -165,7 +171,7 @@ export function deriveConsoleLines(
         (s.reconnects || 0) - (prev.reconnects || 0),
       );
       accumulate(
-        "disconnect",
+        closing ? "closed" : "disconnect",
         time,
         (s.disconnects || 0) - (prev.disconnects || 0),
       );
@@ -226,10 +232,10 @@ export function RunConsole({
           : e.level,
       message: e.message,
     }));
-    return [...server, ...deriveConsoleLines(samples, startedAt)]
+    return [...server, ...deriveConsoleLines(samples, startedAt, !running)]
       .sort((a, b) => a.time - b.time)
       .slice(-MAX_LINES);
-  }, [events, samples, startedAt]);
+  }, [events, samples, startedAt, running]);
   const counts = useMemo(() => {
     const c = Object.fromEntries(levels.map((l) => [l, 0])) as Record<
       ConsoleLevel,

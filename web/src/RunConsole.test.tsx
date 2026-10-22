@@ -50,6 +50,20 @@ it("announces milestones, the target and drops", () => {
   expect(lines).toContain("warn Connected dropped 100 → 60");
 });
 
+it("logs the shutdown drain of a finished run as info", () => {
+  const samples = [
+    at(0, { connected: 100 }),
+    at(1, { connected: 0, disconnects: 100 }),
+  ];
+  const finished = deriveConsoleLines(samples, start, true).map(
+    (l) => `${l.level} ${l.message}`,
+  );
+  expect(finished).toContain("info +100 clients closed at test end");
+  expect(finished.some((l) => l.startsWith("warn"))).toBe(false);
+  const live = deriveConsoleLines(samples, start).map((l) => l.level);
+  expect(live).toContain("warn");
+});
+
 it("batches errors with their reasons into one line per window", () => {
   const samples = [at(0, {})];
   for (let i = 1; i <= 7; i++)

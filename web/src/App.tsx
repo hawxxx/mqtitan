@@ -16,7 +16,7 @@ import { Pager } from "./Pager";
 import { Sparkline } from "./Sparkline";
 import { TimeZonePicker } from "./TimeZonePicker";
 import { WorkerCard } from "./WorkerCard";
-import { dateTime, useTimeZone } from "./timezone";
+import { clock, dateTime, day, useTimeZone } from "./timezone";
 import { YamlEditor, YamlView } from "./YamlCode";
 import {
   createRootRoute,
@@ -408,7 +408,7 @@ function RunTable({
         header: "Started",
         cell: (c) => (
           <span className="mono subdued">
-            {new Date(c.getValue<string>()).toLocaleString()}
+            <Stamp at={c.getValue<string>()} />
           </span>
         ),
       },
@@ -595,7 +595,7 @@ export function Dashboard({
         <Metric
           label="ACTIVE TESTS"
           value={<NumberTicker value={running.length} format={number} />}
-          sub={`${tests.length} total recorded runs`}
+          sub={`${number(tests.length)} recorded ${tests.length === 1 ? "run" : "runs"}`}
           accent
         />
         <Metric
@@ -709,14 +709,18 @@ export function Wizard({
   done: (yaml: string) => void;
   close: () => void;
 }) {
-  // Play the exit animation before unmounting; reduced motion skips the wait.
+  // Play the exit animation before unmounting; reduced motion keeps a shorter
+  // opacity-only fade (see styles.css).
   const [leaving, setLeaving] = useState(false);
   const leave = (after: () => void) => {
     if (leaving) return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
-      return after();
     setLeaving(true);
-    setTimeout(after, 240);
+    setTimeout(
+      after,
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ? 160
+        : 240,
+    );
   };
   const close = () => leave(dismiss);
   const done = (yaml: string) => leave(() => finish(yaml));
@@ -734,15 +738,18 @@ export function Wizard({
   const dialog = useRef<HTMLElement>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
-  // Modal focus: move focus in, keep Tab inside, make the page behind inert,
-  // and return focus to whatever opened the wizard.
+  // Modal focus: move focus to the first field, keep Tab inside, make the
+  // page behind inert and still, and return focus to whatever opened it.
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const shell = document.querySelector<HTMLElement>(".app-shell");
     shell?.setAttribute("inert", "");
-    dialog.current
-      ?.querySelector<HTMLElement>("input, select, button")
-      ?.focus();
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    (
+      dialog.current?.querySelector<HTMLElement>("input, select, textarea") ??
+      dialog.current?.querySelector<HTMLElement>("button")
+    )?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeRef.current();
       if (e.key !== "Tab" || !dialog.current) return;
@@ -765,6 +772,7 @@ export function Wizard({
     return () => {
       window.removeEventListener("keydown", onKey);
       shell?.removeAttribute("inert");
+      document.body.style.overflow = overflow;
       opener?.focus?.();
     };
   }, []);
@@ -1255,7 +1263,9 @@ export function ScenarioEditor({
                   <FileCode2 size={17} />
                   <span>
                     {s.name}
-                    <small>{new Date(s.createdAt).toLocaleDateString()}</small>
+                    <small>
+                      <Stamp at={s.createdAt} format={day} />
+                    </small>
                   </span>
                   <ChevronRight size={14} />
                 </button>
@@ -1891,9 +1901,13 @@ export function BrokerTelemetry() {
           <div className="panel-footer">
             <span>Missing observations are shown as —</span>
             <span>
-              {s?.timestamp
-                ? `Updated ${new Date(s.timestamp).toLocaleTimeString()}`
-                : "No snapshot available"}
+              {s?.timestamp ? (
+                <>
+                  Updated <Stamp at={s.timestamp} format={timeOfDay} />
+                </>
+              ) : (
+                "No snapshot available"
+              )}
             </span>
           </div>
         </>
@@ -2282,8 +2296,21 @@ const compareLabels: Record<string, string> = {
   p99: "Publish latency P99",
   bytesSent: "Bytes sent",
 };
+// Stamp renders a timestamp in the display time zone chosen in the top bar.
+const timeOfDay = (ms: number, zone: string) => clock(ms, zone).slice(0, 8);
+function Stamp({
+  at,
+  format = dateTime,
+}: {
+  at: string;
+  format?: (ms: number, zone: string) => string;
+}) {
+  const zone = useTimeZone();
+  return <time dateTime={at}>{format(Date.parse(at), zone)}</time>;
+}
 function Compare() {
   const q = useTests();
+  const zone = useTimeZone();
   const [a, setA] = useState("");
   const [b, setB] = useState("");
   const tests = q.data || [];
@@ -2310,7 +2337,7 @@ function Compare() {
                 <option value="">Select a run</option>
                 {tests.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name} · {new Date(t.startedAt).toLocaleString()}
+                    {t.name} · {dateTime(Date.parse(t.startedAt), zone)}
                   </option>
                 ))}
               </select>
@@ -2328,7 +2355,7 @@ function Compare() {
                   <th key={i}>
                     {i === 0 ? "A" : "B"} · {t!.name}
                     <small className="compare-when">
-                      {new Date(t!.startedAt).toLocaleString()}
+                      <Stamp at={t!.startedAt} />
                     </small>
                   </th>
                 ))}
@@ -2394,11 +2421,19 @@ function Compare() {
         </section>
       ) : (
         <section className="panel">
-          <Empty
-            icon={GitCompareArrows}
-            title="Choose two runs to compare"
-            detail="Pick a baseline and a candidate to see differences in throughput, latency, and reliability."
-          />
+          {!q.isLoading && tests.length < 2 ? (
+            <Empty
+              icon={GitCompareArrows}
+              title="Record two runs to compare"
+              detail={`Comparison needs a baseline and a candidate. ${tests.length ? "One run is" : "No runs are"} recorded so far.`}
+            />
+          ) : (
+            <Empty
+              icon={GitCompareArrows}
+              title="Choose two runs to compare"
+              detail="Pick a baseline and a candidate to see differences in throughput, latency, and reliability."
+            />
+          )}
         </section>
       )}
     </>

@@ -94,6 +94,10 @@ func Diagnose(r Reader, cpus int, openFiles uint64) []Check {
 		if value == "" {
 			value = "unavailable"
 		}
+		// The kernel reports an unbounded file-max as the int64 maximum.
+		if item.name == "system file max" && value == "9223372036854775807" {
+			value = "unlimited"
+		}
 		if strings.Contains(item.name, "buffers") {
 			f := strings.Fields(value)
 			if len(f) != 3 || integer(f[0]) == 0 || integer(f[1]) == 0 || integer(f[2]) == 0 {
@@ -134,7 +138,11 @@ func Diagnose(r Reader, cpus int, openFiles uint64) []Check {
 			nameservers++
 		}
 	}
-	dnsCheck := Check{"DNS", fmt.Sprintf("%d configured nameservers", nameservers), "INFO", "Review resolver reachability from each worker; names/domains are redacted"}
+	plural := "s"
+	if nameservers == 1 {
+		plural = ""
+	}
+	dnsCheck := Check{"DNS", fmt.Sprintf("%d configured nameserver%s", nameservers, plural), "INFO", "Review resolver reachability from each worker; names/domains are redacted"}
 	if dns == "" {
 		dnsCheck.Value = "unavailable"
 	}
