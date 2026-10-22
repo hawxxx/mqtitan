@@ -381,7 +381,7 @@ func TestPickRandomCoversAll(t *testing.T) {
 
 func TestFamilyFilter(t *testing.T) {
 	log := &queryLog{}
-	s := startDNS(t, log, 0, "::1", "127.0.0.1")
+	s := startDNS(t, log, 0, "::1", "::ffff:127.0.0.1", "127.0.0.1")
 	for _, tt := range []struct {
 		family string
 		want   func(netip.Addr) bool
@@ -389,7 +389,7 @@ func TestFamilyFilter(t *testing.T) {
 	}{
 		{"ipv4", func(a netip.Addr) bool { return a.Is4() }, 1},
 		{"ipv6", func(a netip.Addr) bool { return a.Is6() && !a.Is4In6() }, 1},
-		{"any", func(netip.Addr) bool { return true }, 2},
+		{"any", func(netip.Addr) bool { return true }, 3}, // ::1, mapped ::ffff:127.0.0.1 -> 127.0.0.1, 127.0.0.1
 	} {
 		var h hookLog
 		f, err := NewConnectorWithHooks(testBroker("mqtt://broker.test:1883", &scenario.DNS{Resolvers: servers(s), Family: tt.family}), h.hooks())
@@ -404,6 +404,9 @@ func TestFamilyFilter(t *testing.T) {
 			t.Fatalf("%s: answers %v, hook %v", tt.family, got, h.resolved)
 		}
 		for _, a := range got {
+			if a.Is4In6() {
+				t.Fatalf("%s: IPv4-mapped %v leaked", tt.family, a)
+			}
 			if !tt.want(a) {
 				t.Fatalf("%s: unexpected %v", tt.family, a)
 			}
@@ -526,5 +529,46 @@ func TestClientRemoteAddr(t *testing.T) {
 			t.Fatalf("v%s RemoteAddr = %v, want %v", v, got, want)
 		}
 		c.Close()
+	}
+}
+
+func TestRootedTable(t *testing.T) {
+	for in, want := range map[string]string{"broker.test": "broker.test.", "broker.test.": "broker.test.", "192.0.2.1": "192.0.2.1", "2001:db8::1": "2001:db8::1", "": ""} {
+		if got := rooted(in); got != want {
+			t.Errorf("rooted(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestExpiredContextBlamesNoResolver(t *testing.T) {
+	shortAttempt(t)
+	log := &queryLog{}
+	s0, s1, s2 := startDNS(t, log, 0, "127.0.0.1"), startDNS(t, log, 1, "127.0.0.1"), startDNS(t, log, 2, "127.0.0.1")
+	for _, s := range []*fakeDNS{s0, s1, s2} {
+		s.mode.Store(dnsDrop)
+	}
+	for _, each := range []bool{true, false} {
+		var h hookLog
+		f, err := NewConnectorWithHooks(testBroker("mqtt://broker.test:1883", &scenario.DNS{Resolvers: servers(s0, s1, s2), Family: "ipv4", ResolveEachDial: each}), h.hooks())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Already expired.
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		_, err = f.dialer.lookup(ctx)
+		cancel()
+		if err == nil || Classify(err).Stage != StageDNS {
+			t.Fatalf("err = %v", err)
+		}
+		// Expires while the first resolver drops packets.
+		ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
+		_, err = f.dialer.lookup(ctx)
+		cancel()
+		if err == nil || Classify(err).Stage != StageDNS {
+			t.Fatalf("err = %v", err)
+		}
+		if len(h.errs) > 1 {
+			t.Fatalf("each=%v: OnResolveError fired %d times: %v", each, len(h.errs), h.errs)
+		}
 	}
 }

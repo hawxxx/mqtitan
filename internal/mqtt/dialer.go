@@ -36,13 +36,16 @@ type resolverEntry struct {
 // dialer resolves the broker host with the configured resolvers and connects
 // to the answers. A nil dns block dials host:port directly.
 type dialer struct {
-	dns       *scenario.DNS
-	hooks     Hooks
-	host      string
-	resolvers []resolverEntry
-	next      atomic.Uint32
-	network   string // LookupNetIP network
-	random    bool
+	dns        *scenario.DNS
+	hooks      Hooks
+	host       string
+	rootedHost string
+	hostport   string // host:port, for the system dialer
+	port       uint16
+	resolvers  []resolverEntry
+	next       atomic.Uint32
+	network    string // LookupNetIP network
+	random     bool
 
 	rngMu sync.Mutex
 	rng   *rand.Rand
@@ -51,8 +54,9 @@ type dialer struct {
 	cache   []netip.Addr
 }
 
-func newDialer(host string, d *scenario.DNS, h Hooks) *dialer {
-	dl := &dialer{dns: d, hooks: h, host: host, network: "ip"}
+func newDialer(host, port string, d *scenario.DNS, h Hooks) *dialer {
+	p, _ := strconv.ParseUint(port, 10, 16)
+	dl := &dialer{dns: d, hooks: h, host: host, rootedHost: rooted(host), hostport: net.JoinHostPort(host, port), port: uint16(p), network: "ip"}
 	if d == nil {
 		return dl
 	}
@@ -104,7 +108,7 @@ func (d *dialer) lookup(ctx context.Context) ([]netip.Addr, error) {
 	if ip, err := netip.ParseAddr(d.host); err == nil {
 		return []netip.Addr{ip.Unmap()}, nil
 	}
-	name := rooted(d.host)
+	name := d.rootedHost
 	n := uint32(len(d.resolvers))
 	start := d.next.Add(1) - 1
 	var last error
@@ -131,8 +135,12 @@ func (d *dialer) lookup(ctx context.Context) ([]netip.Addr, error) {
 			}
 			return out, nil
 		}
-		if ctx.Err() == context.Canceled {
-			return nil, err
+		if ctx.Err() != nil { // the caller's deadline or cancellation, not the resolver's fault
+			if ctx.Err() == context.Canceled {
+				return nil, err
+			}
+			last = err
+			break
 		}
 		var de *net.DNSError
 		if errors.As(err, &de) && de.IsNotFound {
@@ -158,6 +166,9 @@ func (d *dialer) addresses(ctx context.Context) ([]netip.Addr, error) {
 		d.cacheMu.Lock()
 		defer d.cacheMu.Unlock()
 		if d.cache == nil {
+			if err := ctx.Err(); err != nil {
+				return nil, stageDNS(err)
+			}
 			a, err := d.lookup(ctx)
 			if err != nil {
 				return nil, err
@@ -184,10 +195,10 @@ func remoteOf(c net.Conn) netip.AddrPort {
 }
 
 // dialTCP connects to hostport (host:port as in the broker URL).
-func (d *dialer) dialTCP(ctx context.Context, port string) (net.Conn, netip.AddrPort, error) {
+func (d *dialer) dialTCP(ctx context.Context) (net.Conn, netip.AddrPort, error) {
 	nd := &net.Dialer{}
 	if d.dns == nil {
-		conn, err := nd.DialContext(ctx, "tcp", net.JoinHostPort(d.host, port))
+		conn, err := nd.DialContext(ctx, "tcp", d.hostport)
 		if err != nil {
 			stage := StageTCP
 			var dns *net.DNSError
@@ -198,17 +209,13 @@ func (d *dialer) dialTCP(ctx context.Context, port string) (net.Conn, netip.Addr
 		}
 		return d.connected(conn)
 	}
-	p, err := strconv.ParseUint(port, 10, 16)
-	if err != nil {
-		return nil, netip.AddrPort{}, &StageError{StageTCP, err}
-	}
 	addrs, err := d.addresses(ctx)
 	if err != nil {
 		return nil, netip.AddrPort{}, err
 	}
 	var last error
 	for _, a := range addrs {
-		conn, err := nd.DialContext(ctx, "tcp", netip.AddrPortFrom(a, uint16(p)).String())
+		conn, err := nd.DialTCP(ctx, "tcp", netip.AddrPort{}, netip.AddrPortFrom(a, d.port))
 		if err == nil {
 			return d.connected(conn)
 		}
@@ -239,5 +246,5 @@ func ResolveBroker(ctx context.Context, b scenario.Broker) ([]netip.Addr, error)
 	if dns == nil {
 		dns = &scenario.DNS{}
 	}
-	return newDialer(u.Hostname(), dns, Hooks{}).lookup(ctx)
+	return newDialer(u.Hostname(), portOf(u), dns, Hooks{}).lookup(ctx)
 }

@@ -104,7 +104,7 @@ func NewConnectorWithHooks(b scenario.Broker, h Hooks) (*Connector, error) {
 		cfg.InsecureSkipVerify = true // chain and name are verified by VerifyConnection
 		cfg.VerifyConnection = verifyPeer(roots, mode, cfg.ServerName)
 	}
-	return &Connector{b, u, cfg, newDialer(u.Hostname(), b.DNS, h)}, nil
+	return &Connector{b, u, cfg, newDialer(u.Hostname(), portOf(u), b.DNS, h)}, nil
 }
 func Connect(parent context.Context, b scenario.Broker, id string, receive func([]byte)) (Client, error) {
 	factory, err := NewConnector(b)
@@ -127,21 +127,25 @@ func (f *Connector) Connect(parent context.Context, id string, receive func([]by
 	}
 	return connect3(ctx, b, u, cfg, f.dialer, id, receive)
 }
+
+// portOf returns the URL port or the scheme default.
+func portOf(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch u.Scheme {
+	case "mqtts":
+		return "8883"
+	case "ws":
+		return "80"
+	case "wss":
+		return "443"
+	}
+	return "1883"
+}
 func dial(ctx context.Context, u *url.URL, cfg *tls.Config, d *dialer) (net.Conn, *alertConn, netip.AddrPort, error) {
 	ws := u.Scheme == "ws" || u.Scheme == "wss"
-	port := u.Port()
-	if port == "" {
-		port = "1883"
-		switch u.Scheme {
-		case "mqtts":
-			port = "8883"
-		case "ws":
-			port = "80"
-		case "wss":
-			port = "443"
-		}
-	}
-	conn, remote, err := d.dialTCP(ctx, port)
+	conn, remote, err := d.dialTCP(ctx)
 	if err != nil {
 		return nil, nil, netip.AddrPort{}, err
 	}
