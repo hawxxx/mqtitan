@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.0](https://github.com/hawxxx/mqtitan/compare/v0.2.1...v0.3.0) (2026-10-22)
+
+
+### ⚠ BREAKING CHANGES
+
+* workers and controller must run the same release. Workers must present the session returned by registration on every heartbeat, and reports are gzip-compressed; older workers cannot heartbeat to this controller and newer workers are rejected by older controllers.
+
+### Features
+
+* add NLB balance testing with DNS controls, churn, safety and broker balance thresholds ([#32](https://github.com/hawxxx/mqtitan/issues/32)) ([80feb55](https://github.com/hawxxx/mqtitan/commit/80feb5542fce173d2890903e94735b5f4f9b1fdc))
+* **web:** add MQTiTan logo branding ([#33](https://github.com/hawxxx/mqtitan/issues/33)) ([6aa3311](https://github.com/hawxxx/mqtitan/commit/6aa3311c41fc24992799af3076deb37bbca404cc))
+
+
+### Bug Fixes
+
+* distributed, security, measurement and accessibility hardening ([#30](https://github.com/hawxxx/mqtitan/issues/30)) ([f72159e](https://github.com/hawxxx/mqtitan/commit/f72159e021ea6be575f90921385edc3568a3ca4a))
+
 ## [0.2.1](https://github.com/hawxxx/mqtitan/compare/v0.2.0...v0.2.1) (2026-10-21)
 
 
