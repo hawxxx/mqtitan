@@ -403,8 +403,8 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 				out.Errors[name] += n
 			}
 		}
-		out.ConnectFailures = mergeCounts(out.ConnectFailures, s.ConnectFailures)
-		out.ConnackReasons = mergeCounts(out.ConnackReasons, s.ConnackReasons)
+		out.ConnectFailures = mergeStages(out.ConnectFailures, s.ConnectFailures)
+		out.ConnackReasons = mergeCodes(out.ConnackReasons, s.ConnackReasons)
 	}
 	p, e, k := histogram(), histogram(), histogram()
 	for _, d := range distributions {
@@ -428,16 +428,49 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 	return out
 }
 
-// mergeCounts adds src into dst, allocating dst only when src has entries.
-func mergeCounts(dst, src map[string]uint64) map[string]uint64 {
+// mergeStages adds src into dst over the known stages only; unknown keys from
+// untrusted worker reports fold into "other" so the sum stays equal to ConnectErrors.
+func mergeStages(dst, src map[string]uint64) map[string]uint64 {
+	other := connectStages[len(connectStages)-1]
 	for k, n := range src {
 		if n == 0 {
 			continue
+		}
+		known := false
+		for _, name := range connectStages {
+			if name == k {
+				known = true
+				break
+			}
+		}
+		if !known {
+			k = other
 		}
 		if dst == nil {
 			dst = map[string]uint64{}
 		}
 		dst[k] += n
+	}
+	return dst
+}
+
+// ParseConnackCode accepts only decimal CONNACK codes 0-255.
+func ParseConnackCode(key string) (int, bool) {
+	v, err := strconv.Atoi(key)
+	return v, err == nil && v >= 0 && v <= 255
+}
+
+// mergeCodes adds src into dst, dropping keys that are not valid CONNACK codes.
+func mergeCodes(dst, src map[string]uint64) map[string]uint64 {
+	for k, n := range src {
+		v, ok := ParseConnackCode(k)
+		if !ok || n == 0 {
+			continue
+		}
+		if dst == nil {
+			dst = map[string]uint64{}
+		}
+		dst[strconv.Itoa(v)] += n
 	}
 	return dst
 }

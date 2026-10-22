@@ -161,3 +161,16 @@ func TestRecordConnectFailureNoAlloc(t *testing.T) {
 		t.Fatalf("allocs=%v", n)
 	}
 }
+
+func TestMergeSnapshotsBoundsWorkerKeys(t *testing.T) {
+	s := Snapshot{ConnectErrors: 6,
+		ConnectFailures: map[string]uint64{"tcp": 1, "bogus": 2, "x-1": 3},
+		ConnackReasons:  map[string]uint64{"135": 1, "-1": 5, "300": 5, "abc": 5, "007": 2}}
+	m := MergeSnapshots([]Snapshot{s}, nil)
+	if m.ConnectFailures["tcp"] != 1 || m.ConnectFailures["other"] != 5 || len(m.ConnectFailures) != 2 {
+		t.Fatalf("%v", m.ConnectFailures)
+	}
+	if m.ConnackReasons["135"] != 1 || m.ConnackReasons["7"] != 2 || len(m.ConnackReasons) != 2 {
+		t.Fatalf("%v", m.ConnackReasons)
+	}
+}

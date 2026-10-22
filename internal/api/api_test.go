@@ -260,3 +260,25 @@ func TestConnectFailuresCSV(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestPrometheusDropsInvalidWorkerKeys(t *testing.T) {
+	m, h := setup(t)
+	snap := metrics.Snapshot{ConnectErrors: 3, ConnectFailures: map[string]uint64{"tcp": 1, "bogus": 2},
+		ConnackReasons: map[string]uint64{"5": 1, "-1": 4, "300": 4, "abc": 4}}
+	if err := m.persist(Test{ID: "bad-keys", Name: "b", Status: "completed", Snapshot: snap}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	body := w.Body.String()
+	if !strings.Contains(body, `emqxload_connack_refusals_total{code="5"} 1`) {
+		t.Fatal(body)
+	}
+	for _, bad := range []string{`code="-1"`, `code="300"`, `code="abc"`, `bogus`} {
+		if strings.Contains(body, bad) {
+			t.Fatalf("series %s exported", bad)
+		}
+	}
+}

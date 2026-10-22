@@ -42,10 +42,10 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 		counters["publish_slots_missed_total"] += s.PublishSlotsMissed
 		counters["correlation_rejected_total"] += s.CorrelationRejected
 		for stage, n := range s.ConnectFailures {
-			stages[stage] += n
+			stages[stage] += n // only known stages are emitted below
 		}
 		for code, n := range s.ConnackReasons {
-			if v, err := strconv.Atoi(code); err == nil {
+			if v, ok := metrics.ParseConnackCode(code); ok {
 				connack[v] += n
 			}
 		}
