@@ -13,6 +13,7 @@ import (
 	"github.com/mqtitan/mqtitan/internal/scenario"
 	"golang.org/x/net/websocket"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"sync"
@@ -25,6 +26,8 @@ type Client interface {
 	Subscribe(context.Context, string, byte) error
 	Close()
 	Done() <-chan struct{}
+	// RemoteAddr is the unmapped broker address the connection was made to.
+	RemoteAddr() netip.AddrPort
 }
 
 func TLSConfig(s scenario.TLS) (*tls.Config, error) {
@@ -71,9 +74,15 @@ type Connector struct {
 	broker scenario.Broker
 	url    *url.URL
 	tls    *tls.Config
+	dialer *dialer
 }
 
 func NewConnector(b scenario.Broker) (*Connector, error) {
+	return NewConnectorWithHooks(b, Hooks{})
+}
+
+// NewConnectorWithHooks is NewConnector with dial observers.
+func NewConnectorWithHooks(b scenario.Broker, h Hooks) (*Connector, error) {
 	u, err := url.Parse(b.URL)
 	if err != nil || u.Host == "" {
 		return nil, errors.New("invalid broker URL")
@@ -95,7 +104,7 @@ func NewConnector(b scenario.Broker) (*Connector, error) {
 		cfg.InsecureSkipVerify = true // chain and name are verified by VerifyConnection
 		cfg.VerifyConnection = verifyPeer(roots, mode, cfg.ServerName)
 	}
-	return &Connector{b, u, cfg}, nil
+	return &Connector{b, u, cfg, newDialer(u.Hostname(), b.DNS, h)}, nil
 }
 func Connect(parent context.Context, b scenario.Broker, id string, receive func([]byte)) (Client, error) {
 	factory, err := NewConnector(b)
@@ -114,15 +123,15 @@ func (f *Connector) Connect(parent context.Context, id string, receive func([]by
 	defer cancel()
 	u, cfg := f.url, f.tls
 	if b.Version == "5" || b.Version == "5.0" {
-		return connect5(ctx, b, u, cfg, id, receive)
+		return connect5(ctx, b, u, cfg, f.dialer, id, receive)
 	}
-	return connect3(ctx, b, u, cfg, id, receive)
+	return connect3(ctx, b, u, cfg, f.dialer, id, receive)
 }
-func dial(ctx context.Context, u *url.URL, cfg *tls.Config) (net.Conn, *alertConn, error) {
+func dial(ctx context.Context, u *url.URL, cfg *tls.Config, d *dialer) (net.Conn, *alertConn, netip.AddrPort, error) {
 	ws := u.Scheme == "ws" || u.Scheme == "wss"
-	host := u.Host
-	if u.Port() == "" {
-		port := "1883"
+	port := u.Port()
+	if port == "" {
+		port = "1883"
 		switch u.Scheme {
 		case "mqtts":
 			port = "8883"
@@ -131,33 +140,27 @@ func dial(ctx context.Context, u *url.URL, cfg *tls.Config) (net.Conn, *alertCon
 		case "wss":
 			port = "443"
 		}
-		host = net.JoinHostPort(u.Hostname(), port)
 	}
-	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", host)
+	conn, remote, err := d.dialTCP(ctx, port)
 	if err != nil {
-		stage := StageTCP
-		var dns *net.DNSError
-		if errors.As(err, &dns) {
-			stage = StageDNS
-		}
-		return nil, nil, &StageError{stage, err}
+		return nil, nil, netip.AddrPort{}, err
 	}
 	if u.Scheme == "mqtts" || u.Scheme == "wss" {
 		tc := tls.Client(conn, cfg)
 		if err := tc.HandshakeContext(ctx); err != nil {
 			_ = conn.Close()
-			return nil, nil, &StageError{StageTLSHandshake, err}
+			return nil, nil, remote, &StageError{StageTLSHandshake, err}
 		}
 		conn = tc
 	}
 	ac := &alertConn{Conn: conn}
 	if !ws {
-		return ac, ac, nil
+		return ac, ac, remote, nil
 	}
 	config, err := websocket.NewConfig(u.String(), "http://localhost")
 	if err != nil {
 		_ = conn.Close()
-		return nil, nil, &StageError{StageWebsocket, err}
+		return nil, nil, remote, &StageError{StageWebsocket, err}
 	}
 	config.Protocol = []string{"mqtt"}
 	config.TlsConfig = cfg
@@ -167,19 +170,20 @@ func dial(ctx context.Context, u *url.URL, cfg *tls.Config) (net.Conn, *alertCon
 	wsConn, err := websocket.NewClient(config, ac)
 	if err != nil {
 		_ = conn.Close()
-		return nil, nil, &StageError{StageWebsocket, err}
+		return nil, nil, remote, &StageError{StageWebsocket, err}
 	}
 	_ = conn.SetDeadline(time.Time{})
 	wsConn.PayloadType = websocket.BinaryFrame
-	return wsConn, ac, nil
+	return wsConn, ac, remote, nil
 }
 
 type client3 struct {
-	c    v3.Client
-	conn net.Conn
-	done chan struct{}
-	once sync.Once
-	mu   sync.Mutex
+	c      v3.Client
+	conn   net.Conn
+	done   chan struct{}
+	once   sync.Once
+	mu     sync.Mutex
+	remote netip.AddrPort
 }
 
 // Paho suppresses the standard local socket-close error. Report a distinct
@@ -201,7 +205,7 @@ func (c *reportClosedConn) Read(b []byte) (int, error) {
 }
 func (c *reportClosedConn) Close() error { c.closed.Store(true); return c.Conn.Close() }
 
-func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, id string, receive func([]byte)) (Client, error) {
+func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, d *dialer, id string, receive func([]byte)) (Client, error) {
 	c := &client3{done: make(chan struct{})}
 	o := v3.NewClientOptions().AddBroker(b.URL).SetClientID(id).SetProtocolVersion(4).SetCleanSession(b.CleanStart).SetAutoReconnect(false).SetConnectRetry(false).SetConnectTimeout(time.Until(deadline(ctx))).SetWriteTimeout(10 * time.Second).SetTLSConfig(cfg).SetOrderMatters(true)
 	if b.KeepAlive.Duration > 0 {
@@ -213,7 +217,7 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	var alert atomic.Pointer[alertConn]
 	var dialErr atomic.Pointer[error]
 	o.SetCustomOpenConnectionFn(func(_ *url.URL, _ v3.ClientOptions) (net.Conn, error) {
-		conn, ac, err := dial(ctx, u, cfg)
+		conn, ac, remote, err := dial(ctx, u, cfg, d)
 		if err != nil {
 			dialErr.Store(&err)
 			return nil, err
@@ -222,6 +226,7 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 		conn = &reportClosedConn{Conn: conn}
 		c.mu.Lock()
 		c.conn = conn
+		c.remote = remote
 		c.mu.Unlock()
 		return conn, nil
 	})
@@ -276,6 +281,11 @@ func (c *client3) closeConn() {
 // Paho reports connection loss after its network and routing workers have joined.
 func (c *client3) Close()                { c.closeConn(); <-c.done }
 func (c *client3) Done() <-chan struct{} { return c.done }
+func (c *client3) RemoteAddr() netip.AddrPort {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.remote
+}
 func wait(ctx context.Context, t v3.Token) error {
 	select {
 	case <-ctx.Done():
@@ -306,12 +316,13 @@ func (c *client3) Subscribe(ctx context.Context, topic string, qos byte) error {
 }
 
 type client5 struct {
-	c    *paho.Client
-	conn net.Conn
+	c      *paho.Client
+	conn   net.Conn
+	remote netip.AddrPort
 }
 
-func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, id string, receive func([]byte)) (Client, error) {
-	conn, alert, err := dial(ctx, u, cfg)
+func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, d *dialer, id string, receive func([]byte)) (Client, error) {
+	conn, alert, remote, err := dial(ctx, u, cfg, d)
 	if err != nil {
 		return nil, err
 	}
@@ -337,10 +348,11 @@ func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 		}
 		return nil, err
 	}
-	return &client5{c: c, conn: conn}, nil
+	return &client5{c: c, conn: conn, remote: remote}, nil
 }
-func (c *client5) Close()                { _ = c.conn.Close(); <-c.c.Done() }
-func (c *client5) Done() <-chan struct{} { return c.c.Done() }
+func (c *client5) Close()                     { _ = c.conn.Close(); <-c.c.Done() }
+func (c *client5) Done() <-chan struct{}      { return c.c.Done() }
+func (c *client5) RemoteAddr() netip.AddrPort { return c.remote }
 func (c *client5) Publish(ctx context.Context, topic string, qos byte, retain bool, data []byte) error {
 	stop := context.AfterFunc(ctx, func() { _ = c.conn.Close() })
 	defer stop()

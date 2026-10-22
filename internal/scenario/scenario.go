@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/netip"
 	"net/url"
 	"os"
 	"strconv"
@@ -54,6 +55,15 @@ type Broker struct {
 	OperationTimeout Duration  `yaml:"operationTimeout,omitempty"`
 	TLS              TLS       `yaml:"tls,omitempty"`
 	Reconnect        Reconnect `yaml:"reconnect,omitempty"`
+	DNS              *DNS      `yaml:"dns,omitempty"`
+}
+
+// DNS controls how the broker hostname is resolved.
+type DNS struct {
+	ResolveEachDial bool     `yaml:"resolveEachDial,omitempty"`
+	Resolvers       []string `yaml:"resolvers,omitempty"` // IP:port literals
+	Pick            string   `yaml:"pick,omitempty"`      // "", "first", "random"
+	Family          string   `yaml:"family,omitempty"`    // "", "any", "ipv4", "ipv6"
 }
 
 type Reconnect struct {
@@ -186,6 +196,26 @@ func (s Scenario) Validate() error {
 	}
 	if tls.HostnameVerification != "" && tls.InsecureSkipVerify {
 		problems = append(problems, "broker.tls.hostnameVerification cannot be combined with insecureSkipVerify")
+	}
+	if d := s.Broker.DNS; d != nil {
+		if len(d.Resolvers) > 16 {
+			problems = append(problems, "broker.dns.resolvers allows at most 16 entries")
+		}
+		for i, r := range d.Resolvers {
+			if _, err := netip.ParseAddrPort(r); err != nil {
+				problems = append(problems, fmt.Sprintf("broker.dns.resolvers[%d] must be an IP:port literal", i))
+			}
+		}
+		switch d.Pick {
+		case "", "first", "random":
+		default:
+			problems = append(problems, "broker.dns.pick must be first or random")
+		}
+		switch d.Family {
+		case "", "any", "ipv4", "ipv6":
+		default:
+			problems = append(problems, "broker.dns.family must be any, ipv4 or ipv6")
+		}
 	}
 	if s.Clients.Count <= 0 {
 		problems = append(problems, "clients.count must be positive")

@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -71,6 +72,43 @@ workloads: [{type: publisher, clients: 2, topic: test, qos: 0, ratePerClient: 1,
 		t.Run(tt.name, func(t *testing.T) {
 			doc := strings.NewReplacer("%URL%", tt.url, "%TLS%", tt.tls).Replace(base)
 			_, err := Parse([]byte(doc))
+			if tt.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDNSValidation(t *testing.T) {
+	base := `apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: dns
+broker: {url: 'mqtt://broker.example.net:1883', version: '3.1.1'%DNS%}
+clients: {count: 2, idTemplate: 'client-${sequence}'}
+stages: [{duration: 1s, targetClients: 2}]
+workloads: [{type: publisher, clients: 2, topic: test, qos: 0, ratePerClient: 1, payload: {type: static}}]
+`
+	many := make([]string, 17)
+	for i := range many {
+		many[i] = fmt.Sprintf("'192.0.2.%d:53'", i+1)
+	}
+	for _, tt := range []struct{ name, dns, want string }{
+		{"absent", "", ""},
+		{"valid", ", dns: {resolvers: ['192.0.2.53:53', '[2001:db8::53]:53'], pick: random, family: ipv4, resolveEachDial: true}", ""},
+		{"bad pick", ", dns: {pick: round}", "broker.dns.pick must be first or random"},
+		{"bad family", ", dns: {family: ip4}", "broker.dns.family must be any, ipv4 or ipv6"},
+		{"hostname resolver", ", dns: {resolvers: ['dns.google:53']}", "IP:port"},
+		{"no port", ", dns: {resolvers: ['192.0.2.53']}", "IP:port"},
+		{"too many", ", dns: {resolvers: [" + strings.Join(many, ",") + "]}", "at most 16"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse([]byte(strings.Replace(base, "%DNS%", tt.dns, 1)))
 			if tt.want == "" {
 				if err != nil {
 					t.Fatal(err)
