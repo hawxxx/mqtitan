@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/platform"
 	"github.com/mqtitan/mqtitan/internal/scenario"
 	"github.com/mqtitan/mqtitan/internal/storage"
@@ -223,8 +224,17 @@ func Handler(m *Manager, opts Options) http.Handler {
 	mux.HandleFunc("POST /api/v1/plan", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Scenario string `json:"scenario"`
+			Workers  *int   `json:"workers"`
 		}
 		if !input(w, r, &body) {
+			return
+		}
+		workers := 1
+		if body.Workers != nil {
+			workers = *body.Workers
+		}
+		if workers < 1 || workers > 256 {
+			writeError(w, 400, "INVALID_REQUEST", "workers must be between 1 and 256")
 			return
 		}
 		s, err := decodeScenario(body.Scenario)
@@ -235,7 +245,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 			writeError(w, 400, "INVALID_SCENARIO", err.Error())
 			return
 		}
-		p := s.Plan()
+		p := s.PlanWith(scenario.PlanOptions{Workers: workers})
 		checks := platform.AssessPlan(platform.PlanInputs{Clients: int64(p.PeakClients), FileDescriptors: int64(p.EstimatedFileDescriptors), MemoryBytes: p.EstimatedMemoryBytes, WireBytesPerSecond: p.EstimatedWireBytesPerSecond}, platform.CurrentCapacity())
 		writeJSON(w, 200, struct {
 			scenario.Plan
@@ -270,9 +280,9 @@ func Handler(m *Manager, opts Options) http.Handler {
 		}
 		w.Header().Set("Content-Type", "text/csv")
 		c := csv.NewWriter(w)
-		_ = c.Write([]string{"timestamp", "connected", "published", "messages_per_second", "bytes_per_second", "p50_ms", "p95_ms", "p99_ms", "connection_errors", "publish_errors", "received", "end_to_end_p95_ms", "subscribe_errors"})
+		_ = c.Write([]string{"timestamp", "connected", "published", "messages_per_second", "bytes_per_second", "p50_ms", "p95_ms", "p99_ms", "connection_errors", "publish_errors", "received", "end_to_end_p95_ms", "subscribe_errors", "connect_failures"})
 		for _, s := range samples {
-			_ = c.Write([]string{s.Timestamp.Format(time.RFC3339Nano), strconv.FormatInt(s.Snapshot.Connected, 10), strconv.FormatUint(s.Snapshot.Published, 10), fmt.Sprint(s.MessageRate), fmt.Sprint(s.ByteRate), fmt.Sprint(float64(s.Snapshot.P50) / 1e6), fmt.Sprint(float64(s.Snapshot.P95) / 1e6), fmt.Sprint(float64(s.Snapshot.P99) / 1e6), fmt.Sprint(s.Snapshot.ConnectErrors), fmt.Sprint(s.Snapshot.PublishErrors), strconv.FormatUint(s.Snapshot.Received, 10), fmt.Sprint(float64(s.Snapshot.EndToEndP95) / 1e6), strconv.FormatUint(s.Snapshot.SubscribeErrors, 10)})
+			_ = c.Write([]string{s.Timestamp.Format(time.RFC3339Nano), strconv.FormatInt(s.Snapshot.Connected, 10), strconv.FormatUint(s.Snapshot.Published, 10), fmt.Sprint(s.MessageRate), fmt.Sprint(s.ByteRate), fmt.Sprint(float64(s.Snapshot.P50) / 1e6), fmt.Sprint(float64(s.Snapshot.P95) / 1e6), fmt.Sprint(float64(s.Snapshot.P99) / 1e6), fmt.Sprint(s.Snapshot.ConnectErrors), fmt.Sprint(s.Snapshot.PublishErrors), strconv.FormatUint(s.Snapshot.Received, 10), fmt.Sprint(float64(s.Snapshot.EndToEndP95) / 1e6), strconv.FormatUint(s.Snapshot.SubscribeErrors, 10), connectFailuresCSV(s.Snapshot.ConnectFailures)})
 		}
 		c.Flush()
 	})
@@ -370,4 +380,18 @@ func bearer(r *http.Request, token string) bool {
 }
 func sameOrigin(origin, host string) bool {
 	return origin == "http://"+host || origin == "https://"+host
+}
+
+// connectFailuresCSV formats non-zero stage counts as stage=n;stage=n in stage order.
+func connectFailuresCSV(failures map[string]uint64) string {
+	var b strings.Builder
+	for _, stage := range metrics.ConnectStages() {
+		if n := failures[stage]; n > 0 {
+			if b.Len() > 0 {
+				b.WriteByte(';')
+			}
+			b.WriteString(stage + "=" + strconv.FormatUint(n, 10))
+		}
+	}
+	return b.String()
 }

@@ -17,6 +17,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"strings"
 	"testing"
 	"time"
 )
@@ -497,5 +498,255 @@ func TestPublishTimeoutIsSaturationNotBrokerDisconnect(t *testing.T) {
 				t.Fatalf("missed slots = %d, want >= 5", snap.PublishSlotsMissed)
 			}
 		})
+	}
+}
+
+func TestEngineCountsConnectFailureStage(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	s := baseScenario("mqtt://"+addr, "5")
+	s.Clients.Count = 1
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 100 * time.Millisecond}, TargetClients: 1}}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err = e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	if got.ConnectErrors == 0 || got.ConnectFailures["tcp"] != got.ConnectErrors || len(got.ConnectFailures) != 1 {
+		t.Fatalf("connectErrors=%d connectFailures=%v", got.ConnectErrors, got.ConnectFailures)
+	}
+}
+
+func TestEngineRecordsRemoteAddress(t *testing.T) {
+	url := testBroker(t)
+	addr := strings.TrimPrefix(url, "mqtt://")
+	s := baseScenario(url, "5")
+	s.Clients.Count = 1
+	s.Broker.AddressLabels = []scenario.AddressLabel{{CIDR: "127.0.0.0/8", Label: "loopback"}}
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 300 * time.Millisecond}, TargetClients: 1}}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	if len(got.RemoteAddresses) != 1 || got.RemoteAddresses[0].Key != addr || got.RemoteAddresses[0].Connects != 1 || got.RemoteAddresses[0].Active != 0 || got.RemoteAddresses[0].Label != "loopback" {
+		t.Fatalf("remote addresses = %+v, want %s", got.RemoteAddresses, addr)
+	}
+	if len(got.AddressLabels) != 1 || got.AddressLabels[0].Key != "loopback" || got.AddressLabels[0].Connects != 1 || got.AddressLabels[0].Active != 0 {
+		t.Fatalf("address labels = %+v", got.AddressLabels)
+	}
+}
+
+type refuseConnectHook struct{ broker.HookBase }
+
+func (h *refuseConnectHook) ID() string { return "refuse-connect" }
+func (h *refuseConnectHook) Provides(b byte) bool {
+	return b == broker.OnConnectAuthenticate
+}
+func (h *refuseConnectHook) OnConnectAuthenticate(*broker.Client, packets.Packet) bool { return false }
+
+func TestRefusedConnectLeavesNoActiveRemote(t *testing.T) {
+	b := broker.New(&broker.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	if err := b.AddHook(new(refuseConnectHook), nil); err != nil {
+		t.Fatal(err)
+	}
+	l := listeners.NewTCP(listeners.Config{ID: "refuse", Address: "127.0.0.1:0"})
+	if err := b.AddListener(l); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = b.Close() })
+	s := baseScenario("mqtt://"+l.Address(), "5")
+	s.Clients.Count = 1
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 200 * time.Millisecond}, TargetClients: 1}}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	if got.ConnectErrors == 0 || got.ConnectFailures["mqtt_connack"] == 0 {
+		t.Fatalf("expected CONNACK refusals, got %+v", got.ConnectFailures)
+	}
+	if len(got.RemoteAddresses) != 0 {
+		t.Fatalf("failed connects recorded remotes: %+v", got.RemoteAddresses)
+	}
+}
+
+func lifetimeScenario(url string, life time.Duration, d time.Duration) scenario.Scenario {
+	s := baseScenario(url, "5")
+	s.Clients.Count = 1
+	s.Clients.Lifetime = &scenario.Lifetime{Min: scenario.Duration{Duration: life}, Max: scenario.Duration{Duration: life}}
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: d}, TargetClients: 1}}
+	return s
+}
+
+// fastChurn shortens the churn reconnect pause for tests of churn counting.
+var fastChurn = [2]time.Duration{time.Millisecond, time.Millisecond}
+
+func TestLifetimeChurnReconnects(t *testing.T) {
+	s := lifetimeScenario(testBroker(t), 50*time.Millisecond, 230*time.Millisecond)
+	s.Broker.Reconnect = scenario.Reconnect{Enabled: false}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m, churnDelay: fastChurn}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	diff := int64(got.Churned) - int64(got.ChurnReconnects)
+	if got.Churned < 3 || diff < 0 || diff > 1 || got.Reconnects != 0 || got.Errors["disconnect"] != 0 {
+		t.Fatalf("churn counters %+v", got)
+	}
+}
+
+func TestLifetimeDoesNotConsumeRetryBudget(t *testing.T) {
+	s := lifetimeScenario(testBroker(t), 20*time.Millisecond, time.Hour)
+	s.Broker.Reconnect = scenario.Reconnect{Enabled: true, MaxAttempts: 1, InitialBackoff: scenario.Duration{Duration: time.Second}, MaxBackoff: scenario.Duration{Duration: time.Second}}
+	m := metrics.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	e := Engine{Scenario: s, Metrics: m, churnDelay: fastChurn}
+	go func() { done <- e.Run(ctx) }()
+	time.Sleep(200 * time.Millisecond)
+	before := m.Churned.Load()
+	time.Sleep(100 * time.Millisecond)
+	after := m.Churned.Load()
+	cancel()
+	<-done
+	if before < 3 || after <= before {
+		t.Fatalf("client stopped churning: before=%d after=%d %+v", before, after, m.Snapshot())
+	}
+	if m.Snapshot().Errors["disconnect"] != 0 {
+		t.Fatalf("churn recorded a disconnect error: %+v", m.Snapshot())
+	}
+}
+
+func TestLifetimeSpread(t *testing.T) {
+	s := baseScenario("mqtt://127.0.0.1:1", "5")
+	s.Seed = 42
+	s.Clients.Lifetime = &scenario.Lifetime{Min: scenario.Duration{Duration: time.Second}, Max: scenario.Duration{Duration: 2 * time.Second}}
+	e := Engine{Scenario: s}
+	seen := map[time.Duration]bool{}
+	for seq := 1; seq <= 200; seq++ {
+		d := e.lifetimeFor(seq, 0)
+		if d < time.Second || d > 2*time.Second {
+			t.Fatalf("lifetime %v outside [1s,2s]", d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("lifetimes are all equal")
+	}
+	if e.lifetimeFor(7, 3) != e.lifetimeFor(7, 3) {
+		t.Fatal("lifetime is not deterministic")
+	}
+}
+
+func TestFailureAfterChurnCountsAsReconnect(t *testing.T) {
+	b := broker.New(&broker.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	_ = b.AddHook(new(auth.AllowHook), nil)
+	l := listeners.NewTCP(listeners.Config{ID: "tcp", Address: "127.0.0.1:0"})
+	if err := b.AddListener(l); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.Serve()
+	defer b.Close()
+	s := lifetimeScenario("mqtt://"+l.Address(), 300*time.Millisecond, time.Hour)
+	s.Broker.Reconnect = scenario.Reconnect{Enabled: true, MaxAttempts: 3, InitialBackoff: scenario.Duration{Duration: time.Millisecond}, MaxBackoff: scenario.Duration{Duration: 2 * time.Millisecond}}
+	m := metrics.New()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	e := Engine{Scenario: s, Metrics: m, churnDelay: fastChurn}
+	go func() { done <- e.Run(ctx) }()
+	for m.ChurnReconnects.Load() < 1 || m.Connected.Load() != 1 {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("no churn reconnect: %+v", m.Snapshot())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	churnReconnects := m.ChurnReconnects.Load()
+	cl, ok := b.Clients.Get("wire-1")
+	if !ok {
+		t.Fatal("broker lacks client")
+	}
+	_ = cl.Net.Conn.Close()
+	for m.Reconnects.Load() < 1 {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("failure not counted as reconnect: %+v", m.Snapshot())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if got := m.ChurnReconnects.Load(); got != churnReconnects {
+		t.Fatalf("failure reconnect counted as churn: %d -> %d", churnReconnects, got)
+	}
+	cancel()
+	<-done
+}
+
+func TestChurnDelayRange(t *testing.T) {
+	s := baseScenario("mqtt://127.0.0.1:1", "5")
+	s.Seed = 42
+	e := Engine{Scenario: s}
+	seen := map[time.Duration]bool{}
+	for seq := 1; seq <= 200; seq++ {
+		d := e.churnDelayFor(seq, 0)
+		if d < 100*time.Millisecond || d > time.Second {
+			t.Fatalf("churn delay %v outside [100ms,1s]", d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("churn delays are all equal")
+	}
+	if e.churnDelayFor(7, 3) != e.churnDelayFor(7, 3) {
+		t.Fatal("churn delay is not deterministic")
+	}
+}
+
+func TestChurnReconnectWaitsBeforeReconnecting(t *testing.T) {
+	s := lifetimeScenario(testBroker(t), 20*time.Millisecond, 250*time.Millisecond)
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Each churn cycle is 20ms connected plus at least 100ms of jitter.
+	if got := m.Snapshot(); got.Churned < 1 || got.Churned > 3 {
+		t.Fatalf("churn counters %+v", got)
+	}
+}
+
+func TestPartitionsDrawDifferentLifetimes(t *testing.T) {
+	s := baseScenario("mqtt://127.0.0.1:1", "5")
+	s.Seed = 42
+	s.Clients.Lifetime = &scenario.Lifetime{Min: scenario.Duration{Duration: time.Second}, Max: scenario.Duration{Duration: time.Hour}}
+	a, b := Engine{Scenario: s}, Engine{Scenario: s}
+	b.Scenario.Clients.SequenceOffset = 100
+	if a.lifetimeFor(1, 0) == b.lifetimeFor(1, 0) {
+		t.Fatal("partitions with different offsets draw the same lifetime for local seq 1")
+	}
+	if a.churnDelayFor(1, 0) == b.churnDelayFor(1, 0) {
+		t.Fatal("partitions with different offsets draw the same churn delay")
+	}
+	if a.dialSeed() == b.dialSeed() {
+		t.Fatal("partitions with different offsets share the dialer seed")
+	}
+	if a.dialSeed() != s.Seed {
+		t.Fatal("offset 0 changed the dialer seed")
 	}
 }

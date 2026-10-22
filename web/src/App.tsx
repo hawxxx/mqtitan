@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { AddressDistribution } from "./AddressDistribution";
+import { BalancePanel, liveBalance } from "./BalancePanel";
 import { LatencyPanel } from "./LatencyPanel";
 import { CertificateSettings } from "./CertificateSettings";
 import { LiveLoadControls } from "./LiveLoadControls";
@@ -67,6 +69,7 @@ import {
   number,
   request,
   type Check,
+  type FleetSample,
   type Sample,
   type SavedScenario,
   type Test,
@@ -143,6 +146,40 @@ function failedThresholds(t: Test) {
 }
 function totalErrors(s: Test["snapshot"]) {
   return s.connectErrors + s.publishErrors + (s.subscribeErrors || 0);
+}
+export function topConnectFailure(failures?: Record<string, number>) {
+  const top = Object.entries(failures || {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])[0];
+  return top ? `${top[0]} ${top[1]}` : "";
+}
+export function ConnectFailures({
+  failures,
+  connack,
+}: {
+  failures?: Record<string, number>;
+  connack?: Record<string, number>;
+}) {
+  const stages = Object.entries(failures || {}).filter(([, n]) => n > 0);
+  if (!stages.length) return null;
+  const codes = Object.entries(connack || {}).filter(([, n]) => n > 0);
+  return (
+    <section className="panel side-panel">
+      <h2>Connect failures by stage</h2>
+      {stages.map(([stage, n]) => (
+        <div className="plan-row" key={stage}>
+          <span>{stage}</span>
+          <strong className="mono">{number(n)}</strong>
+        </div>
+      ))}
+      {codes.map(([code, n]) => (
+        <div className="plan-row" key={`connack-${code}`}>
+          <span>{`CONNACK ${code}`}</span>
+          <strong className="mono">{number(n)}</strong>
+        </div>
+      ))}
+    </section>
+  );
 }
 function Badge({ status }: { status: string }) {
   return (
@@ -227,7 +264,10 @@ function Chart({
         height: 235,
         scales: { x: { time: false } },
         series: [
-          { label: "Elapsed", value: (_u, v) => (v == null ? "—" : elapsed(v)) },
+          {
+            label: "Elapsed",
+            value: (_u, v) => (v == null ? "—" : elapsed(v)),
+          },
           {
             label,
             stroke: "#39c7b0",
@@ -242,7 +282,9 @@ function Chart({
             stroke: "#7f949c",
             grid: { stroke: "rgba(127,148,156,.08)" },
             font: "11px monospace",
-            incrs: [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200],
+            incrs: [
+              1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200,
+            ],
             values: (_u, ticks) => ticks.map(elapsed),
           },
           {
@@ -636,7 +678,9 @@ export function Wizard({
     const opener = document.activeElement as HTMLElement | null;
     const shell = document.querySelector<HTMLElement>(".app-shell");
     shell?.setAttribute("inert", "");
-    dialog.current?.querySelector<HTMLElement>("input, select, button")?.focus();
+    dialog.current
+      ?.querySelector<HTMLElement>("input, select, button")
+      ?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeRef.current();
       if (e.key !== "Tab" || !dialog.current) return;
@@ -671,7 +715,14 @@ export function Wizard({
       setCertificateBusy(false);
     setV((p) => ({
       ...p,
-      [k]: ["clients", "capacity", "rate", "duration", "qos", "payloadSize"].includes(k)
+      [k]: [
+        "clients",
+        "capacity",
+        "rate",
+        "duration",
+        "qos",
+        "payloadSize",
+      ].includes(k)
         ? Number(value)
         : value,
     }));
@@ -1193,6 +1244,10 @@ function useStream(id: string, running: boolean) {
                 qc.setQueryData<Sample[]>(["metrics", id], (old) =>
                   [...(old || []), v].slice(-10000),
                 );
+              if (event === "broker")
+                qc.setQueryData<FleetSample[]>(["brokers", id], (old) =>
+                  [...(old || []), v].slice(-2880),
+                );
               if (event === "status") {
                 qc.setQueryData(["test", id], v);
                 qc.invalidateQueries({ queryKey: ["tests"] });
@@ -1235,6 +1290,11 @@ function TestDetail({ id }: { id: string }) {
     refetchInterval: t?.status === "running" ? 5000 : false,
   });
   const stream = useStream(id, t?.status === "running");
+  const brokers = useQuery({
+    queryKey: ["brokers", id],
+    queryFn: () => request<FleetSample[]>(`/tests/${id}/brokers`),
+    refetchInterval: t?.status === "running" ? 10000 : false,
+  });
   const [tab, setTab] = useState("Overview");
   const [exportError, setExportError] = useState<unknown>();
   const qc = useQueryClient();
@@ -1390,8 +1450,7 @@ function TestDetail({ id }: { id: string }) {
           sub={`${number(s.connectErrors)} connection · ${number(s.publishErrors)} publish · ${number(s.subscribeErrors || 0)} subscribe${s.errors?.timeout ? ` (${number(s.errors.timeout)} timed out)` : ""}`}
         />
       </div>
-      {t.loadControl &&
-        (t.status === "running" || !!t.loadChanges?.length) && (
+      {t.loadControl && (t.status === "running" || !!t.loadChanges?.length) && (
         <LiveLoadControls
           test={t}
           onUpdated={(updated) => {
@@ -1482,6 +1541,8 @@ function TestDetail({ id }: { id: string }) {
             )}
           </section>
           {tab === "Latency" && <LatencyPanel snapshot={s} />}
+          <AddressDistribution snapshot={s} samples={metrics.data || []} />
+          <BalancePanel balance={t.balance || liveBalance(brokers.data)} />
           <div className="two-col">
             <section className="panel side-panel">
               <h2>Connection telemetry</h2>
@@ -1491,6 +1552,8 @@ function TestDetail({ id }: { id: string }) {
                 ["Connecting", s.connecting],
                 ["Errors", s.connectErrors],
                 ["Reconnects", s.reconnects || 0],
+                ["Churned", s.churned || 0],
+                ["Churn reconnects", s.churnReconnects || 0],
                 ["Subscriptions", s.subscriptions || 0],
               ].map(([k, v]) => (
                 <div className="plan-row" key={k}>
@@ -1499,13 +1562,20 @@ function TestDetail({ id }: { id: string }) {
                 </div>
               ))}
             </section>
+            <ConnectFailures
+              failures={s.connectFailures}
+              connack={s.connackReasons}
+            />
             <section className="panel side-panel">
               <h2>Delivery telemetry</h2>
               {[
                 ["Publish attempts", number(s.publishAttempts)],
                 ["Publish errors", number(s.publishErrors)],
                 ["Missed publish slots", number(s.publishSlotsMissed || 0)],
-                ["Clock-skewed correlations", number(s.correlationRejected || 0)],
+                [
+                  "Clock-skewed correlations",
+                  number(s.correlationRejected || 0),
+                ],
                 ["Bytes sent", bytes(s.bytesSent)],
                 ["Messages received", number(s.received)],
                 ["Bytes received", bytes(s.bytesReceived)],
@@ -2033,7 +2103,7 @@ function Errors() {
                 <p>
                   {t.error ||
                     failedThresholds(t) ||
-                    `${number(t.snapshot.connectErrors)} connection errors · ${number(t.snapshot.publishErrors)} publish errors · ${number(t.snapshot.subscribeErrors || 0)} subscribe errors`}
+                    `${number(t.snapshot.connectErrors)} connection errors${topConnectFailure(t.snapshot.connectFailures) ? ` (top stage ${topConnectFailure(t.snapshot.connectFailures)})` : ""} · ${number(t.snapshot.publishErrors)} publish errors · ${number(t.snapshot.subscribeErrors || 0)} subscribe errors`}
                 </p>
               </div>
               <Badge status={t.status} />
@@ -2180,7 +2250,9 @@ function Shell() {
           </div>
           <button
             className="theme-button"
-            aria-label={theme === "dark" ? "Light appearance" : "Dark appearance"}
+            aria-label={
+              theme === "dark" ? "Light appearance" : "Dark appearance"
+            }
             title={theme === "dark" ? "Light appearance" : "Dark appearance"}
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
           >

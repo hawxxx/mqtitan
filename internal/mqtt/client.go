@@ -13,6 +13,7 @@ import (
 	"github.com/mqtitan/mqtitan/internal/scenario"
 	"golang.org/x/net/websocket"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"sync"
@@ -24,10 +25,16 @@ type Client interface {
 	Publish(context.Context, string, byte, bool, []byte) error
 	Subscribe(context.Context, string, byte) error
 	Close()
+	// Disconnect sends an MQTT DISCONNECT, then closes like Close.
+	Disconnect()
 	Done() <-chan struct{}
+	// RemoteAddr is the unmapped broker address the connection was made to.
+	RemoteAddr() netip.AddrPort
 }
 
-func TLSConfig(s scenario.TLS) (*tls.Config, error) {
+// TLSConfig builds the client TLS configuration. With strict set (the
+// scenario's safety.strictSecrets) a key file with findings is refused.
+func TLSConfig(s scenario.TLS, strict bool) (*tls.Config, error) {
 	if s.Profile != "" {
 		return nil, errors.New("TLS certificate profile requires its controller; use --controller or provide local PEM files")
 	}
@@ -51,9 +58,12 @@ func TLSConfig(s scenario.TLS) (*tls.Config, error) {
 		c.RootCAs = pool
 	}
 	if s.CertFile != "" || s.KeyFile != "" {
+		if err := checkKeyFile(s.KeyFile, strict); err != nil {
+			return nil, err
+		}
 		cert, err := tls.LoadX509KeyPair(s.CertFile, s.KeyFile)
 		if err != nil {
-			return nil, fmt.Errorf("TLS client certificate: %w", err)
+			return nil, errors.New("TLS client certificate or key cannot be loaded")
 		}
 		c.Certificates = []tls.Certificate{cert}
 	}
@@ -71,21 +81,37 @@ type Connector struct {
 	broker scenario.Broker
 	url    *url.URL
 	tls    *tls.Config
+	dialer *dialer
 }
 
 func NewConnector(b scenario.Broker) (*Connector, error) {
+	return NewConnectorWithHooks(b, Hooks{})
+}
+
+// NewConnectorWithHooks is NewConnector with dial observers.
+func NewConnectorWithHooks(b scenario.Broker, h Hooks) (*Connector, error) {
 	u, err := url.Parse(b.URL)
 	if err != nil || u.Host == "" {
 		return nil, errors.New("invalid broker URL")
 	}
-	cfg, err := TLSConfig(b.TLS)
+	cfg, err := TLSConfig(b.TLS, h.StrictSecrets)
 	if err != nil {
 		return nil, err
 	}
 	if cfg.ServerName == "" {
 		cfg.ServerName = u.Hostname()
 	}
-	return &Connector{b, u, cfg}, nil
+	if mode := b.TLS.HostnameVerification; mode == "cn-fallback" || mode == "none" {
+		roots := cfg.RootCAs
+		if roots == nil {
+			if roots, err = x509.SystemCertPool(); err != nil {
+				return nil, errors.New("TLS system trust roots unavailable")
+			}
+		}
+		cfg.InsecureSkipVerify = true // chain and name are verified by VerifyConnection
+		cfg.VerifyConnection = verifyPeer(roots, mode, cfg.ServerName)
+	}
+	return &Connector{b, u, cfg, newDialer(u.Hostname(), portOf(u), b.DNS, h)}, nil
 }
 func Connect(parent context.Context, b scenario.Broker, id string, receive func([]byte)) (Client, error) {
 	factory, err := NewConnector(b)
@@ -104,69 +130,71 @@ func (f *Connector) Connect(parent context.Context, id string, receive func([]by
 	defer cancel()
 	u, cfg := f.url, f.tls
 	if b.Version == "5" || b.Version == "5.0" {
-		return connect5(ctx, b, u, cfg, id, receive)
+		return connect5(ctx, b, u, cfg, f.dialer, id, receive)
 	}
-	return connect3(ctx, b, u, cfg, id, receive)
+	return connect3(ctx, b, u, cfg, f.dialer, id, receive)
 }
-func dial(ctx context.Context, u *url.URL, cfg *tls.Config) (net.Conn, error) {
-	if u.Scheme == "ws" || u.Scheme == "wss" {
-		config, err := websocket.NewConfig(u.String(), "http://localhost")
-		if err != nil {
-			return nil, err
-		}
-		config.Protocol = []string{"mqtt"}
-		config.TlsConfig = cfg
-		host := u.Host
-		if u.Port() == "" {
-			port := "80"
-			if u.Scheme == "wss" {
-				port = "443"
-			}
-			host = net.JoinHostPort(u.Hostname(), port)
-		}
-		d := &net.Dialer{}
-		var conn net.Conn
-		if u.Scheme == "wss" {
-			conn, err = (&tls.Dialer{NetDialer: d, Config: cfg}).DialContext(ctx, "tcp", host)
-		} else {
-			conn, err = d.DialContext(ctx, "tcp", host)
-		}
-		if err != nil {
-			return nil, err
-		}
-		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-		defer stop()
-		_ = conn.SetDeadline(deadline(ctx))
-		ws, err := websocket.NewClient(config, conn)
-		if err != nil {
+
+// portOf returns the URL port or the scheme default.
+func portOf(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch u.Scheme {
+	case "mqtts":
+		return "8883"
+	case "ws":
+		return "80"
+	case "wss":
+		return "443"
+	}
+	return "1883"
+}
+func dial(ctx context.Context, u *url.URL, cfg *tls.Config, d *dialer) (net.Conn, *alertConn, netip.AddrPort, error) {
+	ws := u.Scheme == "ws" || u.Scheme == "wss"
+	conn, remote, err := d.dialTCP(ctx)
+	if err != nil {
+		return nil, nil, netip.AddrPort{}, err
+	}
+	if u.Scheme == "mqtts" || u.Scheme == "wss" {
+		tc := tls.Client(conn, cfg)
+		if err := tc.HandshakeContext(ctx); err != nil {
 			_ = conn.Close()
-			return nil, err
+			return nil, nil, remote, &StageError{StageTLSHandshake, err}
 		}
-		_ = conn.SetDeadline(time.Time{})
-		ws.PayloadType = websocket.BinaryFrame
-		return ws, nil
+		conn = tc
 	}
-	host := u.Host
-	if u.Port() == "" {
-		port := "1883"
-		if u.Scheme == "mqtts" {
-			port = "8883"
-		}
-		host = net.JoinHostPort(u.Hostname(), port)
+	ac := &alertConn{Conn: conn}
+	if !ws {
+		return ac, ac, remote, nil
 	}
-	d := &net.Dialer{}
-	if u.Scheme == "mqtts" {
-		return (&tls.Dialer{NetDialer: d, Config: cfg}).DialContext(ctx, "tcp", host)
+	config, err := websocket.NewConfig(u.String(), "http://localhost")
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, remote, &StageError{StageWebsocket, err}
 	}
-	return d.DialContext(ctx, "tcp", host)
+	config.Protocol = []string{"mqtt"}
+	config.TlsConfig = cfg
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	_ = conn.SetDeadline(deadline(ctx))
+	wsConn, err := websocket.NewClient(config, ac)
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, remote, &StageError{StageWebsocket, err}
+	}
+	_ = conn.SetDeadline(time.Time{})
+	wsConn.PayloadType = websocket.BinaryFrame
+	return wsConn, ac, remote, nil
 }
 
 type client3 struct {
-	c    v3.Client
-	conn net.Conn
-	done chan struct{}
-	once sync.Once
-	mu   sync.Mutex
+	c      v3.Client
+	conn   net.Conn
+	done   chan struct{}
+	once   sync.Once
+	mu     sync.Mutex
+	remote netip.AddrPort
 }
 
 // Paho suppresses the standard local socket-close error. Report a distinct
@@ -188,7 +216,7 @@ func (c *reportClosedConn) Read(b []byte) (int, error) {
 }
 func (c *reportClosedConn) Close() error { c.closed.Store(true); return c.Conn.Close() }
 
-func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, id string, receive func([]byte)) (Client, error) {
+func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, d *dialer, id string, receive func([]byte)) (Client, error) {
 	c := &client3{done: make(chan struct{})}
 	o := v3.NewClientOptions().AddBroker(b.URL).SetClientID(id).SetProtocolVersion(4).SetCleanSession(b.CleanStart).SetAutoReconnect(false).SetConnectRetry(false).SetConnectTimeout(time.Until(deadline(ctx))).SetWriteTimeout(10 * time.Second).SetTLSConfig(cfg).SetOrderMatters(true)
 	if b.KeepAlive.Duration > 0 {
@@ -197,15 +225,21 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	o.SetUsername(b.Username).SetPassword(b.Password)
 	o.SetDefaultPublishHandler(func(_ v3.Client, m v3.Message) { receive(m.Payload()) })
 	o.SetConnectionLostHandler(func(_ v3.Client, _ error) { c.once.Do(func() { close(c.done) }) })
+	var alert atomic.Pointer[alertConn]
+	var dialErr atomic.Pointer[error]
 	o.SetCustomOpenConnectionFn(func(_ *url.URL, _ v3.ClientOptions) (net.Conn, error) {
-		conn, err := dial(ctx, u, cfg)
-		if err == nil {
-			conn = &reportClosedConn{Conn: conn}
-			c.mu.Lock()
-			c.conn = conn
-			c.mu.Unlock()
+		conn, ac, remote, err := dial(ctx, u, cfg, d)
+		if err != nil {
+			dialErr.Store(&err)
+			return nil, err
 		}
-		return conn, err
+		alert.Store(ac)
+		conn = &reportClosedConn{Conn: conn}
+		c.mu.Lock()
+		c.conn = conn
+		c.remote = remote
+		c.mu.Unlock()
+		return conn, nil
 	})
 	c.c = v3.NewClient(o)
 	token := c.c.Connect()
@@ -218,7 +252,15 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	case <-token.Done():
 	}
 	if err := token.Error(); err != nil {
+		err = alert.Load().alertOr(err)
 		c.closeConn()
+		// A failed dial carries its stage; a resolver timeout must stay a DNS failure.
+		if p := dialErr.Load(); p != nil {
+			var se *StageError
+			if errors.As(*p, &se) && se.Stage == StageDNS {
+				return nil, *p
+			}
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -250,6 +292,18 @@ func (c *client3) closeConn() {
 // Paho reports connection loss after its network and routing workers have joined.
 func (c *client3) Close()                { c.closeConn(); <-c.done }
 func (c *client3) Done() <-chan struct{} { return c.done }
+func (c *client3) Disconnect() {
+	// A clean disconnect does not invoke the connection-lost handler, so
+	// release Done ourselves once paho has joined its workers.
+	c.c.Disconnect(250)
+	c.closeConn()
+	c.once.Do(func() { close(c.done) })
+}
+func (c *client3) RemoteAddr() netip.AddrPort {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.remote
+}
 func wait(ctx context.Context, t v3.Token) error {
 	select {
 	case <-ctx.Done():
@@ -280,12 +334,13 @@ func (c *client3) Subscribe(ctx context.Context, topic string, qos byte) error {
 }
 
 type client5 struct {
-	c    *paho.Client
-	conn net.Conn
+	c      *paho.Client
+	conn   net.Conn
+	remote netip.AddrPort
 }
 
-func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, id string, receive func([]byte)) (Client, error) {
-	conn, err := dial(ctx, u, cfg)
+func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, d *dialer, id string, receive func([]byte)) (Client, error) {
+	conn, alert, remote, err := dial(ctx, u, cfg, d)
 	if err != nil {
 		return nil, err
 	}
@@ -298,21 +353,31 @@ func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 		keep = keepAliveSeconds(b.KeepAlive.Duration)
 	}
 	ack, err := c.Connect(ctx, &paho.Connect{ClientID: id, CleanStart: b.CleanStart, KeepAlive: keep, Username: b.Username, Password: []byte(b.Password), UsernameFlag: b.Username != "", PasswordFlag: b.Password != ""})
+	// paho.golang returns a non-nil Connack together with an error for a refusal.
+	if ack != nil && ack.ReasonCode >= 0x80 {
+		_ = conn.Close()
+		return nil, &ConnackError{ack.ReasonCode}
+	}
 	if err != nil {
+		err = alert.alertOr(err)
 		_ = conn.Close()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, err
 	}
-	if ack.ReasonCode >= 128 {
-		_ = conn.Close()
-		return nil, fmt.Errorf("CONNACK reason %d", ack.ReasonCode)
-	}
-	return &client5{c: c, conn: conn}, nil
+	return &client5{c: c, conn: conn, remote: remote}, nil
 }
-func (c *client5) Close()                { _ = c.conn.Close(); <-c.c.Done() }
-func (c *client5) Done() <-chan struct{} { return c.c.Done() }
+func (c *client5) Close()                     { _ = c.conn.Close(); <-c.c.Done() }
+func (c *client5) Done() <-chan struct{}      { return c.c.Done() }
+func (c *client5) RemoteAddr() netip.AddrPort { return c.remote }
+func (c *client5) Disconnect() {
+	// paho writes DISCONNECT without a deadline; bound it so a broker that
+	// stopped reading cannot block the session (Close then unblocks).
+	_ = c.conn.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
+	_ = c.c.Disconnect(&paho.Disconnect{ReasonCode: 0})
+	c.Close()
+}
 func (c *client5) Publish(ctx context.Context, topic string, qos byte, retain bool, data []byte) error {
 	stop := context.AfterFunc(ctx, func() { _ = c.conn.Close() })
 	defer stop()

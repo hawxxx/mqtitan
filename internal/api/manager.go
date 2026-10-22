@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/emqx"
 	"github.com/mqtitan/mqtitan/internal/engine"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/scenario"
@@ -37,6 +38,7 @@ type Test struct {
 	WorkerIDs    []string            `json:"workerIds"`
 	LostWorkers  []string            `json:"lostWorkers,omitempty"`
 	SourceTestID string              `json:"sourceTestId,omitempty"`
+	Balance      *emqx.Balance       `json:"balance,omitempty"`
 }
 type Sample struct {
 	Timestamp   time.Time        `json:"timestamp"`
@@ -55,6 +57,7 @@ type Event struct {
 	Data any
 }
 type execution struct {
+	fromAPI     bool
 	ctx         context.Context
 	control     *engine.Control
 	test        Test
@@ -66,17 +69,23 @@ type execution struct {
 	// Guarded by the worker registry lock.
 	peakConnected int64
 	lostWorkers   []string
+	// Guarded by Manager.mu.
+	brokers []emqx.FleetSample
 }
 type Manager struct {
-	store   *storage.Store
-	mu      sync.Mutex
-	runs    map[string]*execution
-	ctx     context.Context
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	closed  bool
-	workers *workerRegistry
-	broker  BrokerTelemetry
+	store          *storage.Store
+	mu             sync.Mutex
+	runs           map[string]*execution
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	closed         bool
+	workers        *workerRegistry
+	broker         BrokerTelemetry
+	creds          emqx.Credentials
+	telemetryHosts []string
+	// telemetryEvery overrides the scenario poll interval; tests only.
+	telemetryEvery time.Duration
 }
 
 func NewManager(store *storage.Store) (*Manager, error) {
@@ -148,22 +157,31 @@ func (m *Manager) persist(t Test) error {
 
 func (m *Manager) Start(raw string) (Test, error) { return m.StartOnWorkers(raw, nil) }
 func (m *Manager) StartOnWorkers(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, "", decodeScenario)
+	return m.startTest(raw, workerIDs, "", decodeScenario, true)
 }
 
 // StartLocal starts a scenario supplied by the CLI user who owns this
 // in-process controller; unlike API submissions it may use TLS file paths.
 func (m *Manager) StartLocal(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, "", decodeLocalScenario)
+	return m.startTest(raw, workerIDs, "", decodeLocalScenario, false)
 }
-func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string, decode func(string) (scenario.Scenario, error)) (Test, error) {
+func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string, decode func(string) (scenario.Scenario, error), fromAPI bool) (Test, error) {
 	s, err := decode(raw)
 	if err != nil {
 		return Test{}, err
 	}
+	if fromAPI && s.Telemetry != nil {
+		if err = m.checkTelemetryHosts(*s.Telemetry); err != nil {
+			return Test{}, err
+		}
+	}
 	s, err = m.resolveCertificates(s)
 	if err != nil {
 		return Test{}, err
+	}
+	var baseline *emqx.FleetSample
+	if s.Telemetry != nil {
+		baseline = m.fetchBaseline(m.ctx, *s.Telemetry, fromAPI)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -180,7 +198,7 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 	copy(ids, workerIDs)
 	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, SourceTestID: sourceTestID}
 	counters := metrics.New()
-	r := &execution{ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot}
+	r := &execution{fromAPI: fromAPI, ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot}
 	if len(workerIDs) > 0 {
 		if err := m.assign(r, s, workerIDs); err != nil {
 			cancel()
@@ -195,14 +213,18 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 	}
 	m.runs[t.ID] = r
 	m.wg.Add(1)
-	go m.execute(ctx, r, s)
+	go m.execute(ctx, r, s, baseline)
 	return publicTest(t), nil
 }
 
-func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario) {
+func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario, baseline *emqx.FleetSample) {
 	ctx, span := otel.Tracer("mqtitan/controller").Start(ctx, "scenario.execute")
 	defer span.End()
 	defer m.wg.Done()
+	stopTelemetry := func() {}
+	if s.Telemetry != nil {
+		stopTelemetry = m.startTelemetry(ctx, r, *s.Telemetry, baseline)
+	}
 	done := make(chan error, 1)
 	e := engine.Engine{Scenario: s, Metrics: r.counters, Control: r.control}
 	go func() {
@@ -249,8 +271,15 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			record()
 		case err := <-done:
 			record()
+			stopTelemetry()
 			now := time.Now().UTC()
-			results, thresholdErr := thresholds.Evaluate(s.Thresholds, r.snapshot())
+			var balance *emqx.Balance
+			m.mu.Lock()
+			if peak, ok := emqx.PeakBalance(r.brokers); ok {
+				balance = &peak
+			}
+			m.mu.Unlock()
+			results, thresholdErr := thresholds.Evaluate(s.Thresholds, r.snapshot(), balance)
 			m.mu.Lock()
 			r.test.EndedAt = &now
 			if len(r.workerIDs) > 0 {
@@ -259,6 +288,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 				m.workers.mu.Unlock()
 			}
 			r.test.Thresholds = results
+			r.test.Balance = balance
 			r.test.Status = "completed"
 			if ctx.Err() != nil {
 				r.test.Status = "stopped"

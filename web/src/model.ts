@@ -1,4 +1,10 @@
 import { stringify } from "yaml";
+export interface LabelCount {
+  key: string;
+  label?: string;
+  connects: number;
+  active: number;
+}
 export interface Snapshot {
   connected: number;
   targetClients: number;
@@ -25,10 +31,18 @@ export interface Snapshot {
   correlationSamples?: number;
   endToEndP95?: number;
   errors?: Record<string, number>;
+  connectFailures?: Record<string, number>;
+  connackReasons?: Record<string, number>;
+  remoteAddresses?: LabelCount[];
+  addressLabels?: LabelCount[];
+  dnsAnswers?: LabelCount[];
+  dnsErrors?: LabelCount[];
   peakConnected: number;
   subscriptions?: number;
   subscribeErrors?: number;
   reconnects?: number;
+  churned?: number;
+  churnReconnects?: number;
   disconnects?: number;
   publishSlotsMissed?: number;
   correlationRejected?: number;
@@ -52,6 +66,7 @@ export interface Test {
   workerIds?: string[] | null;
   lostWorkers?: string[];
   sourceTestId?: string;
+  balance?: Balance;
   loadControl?: {
     capacityClients: number;
     maxRatePerClient: number;
@@ -68,6 +83,35 @@ export interface Test {
     ratePerClient: number;
     revision: number;
   }[];
+}
+export interface TargetSample {
+  target: string;
+  zone: string;
+  connections: number;
+  raw: number;
+  error?: string;
+}
+export interface FleetSample {
+  timestamp: string;
+  source: "emqx" | "prometheus";
+  targets: TargetSample[];
+  complete: boolean;
+  baseline: boolean;
+  error?: string;
+}
+export interface BalanceGroup {
+  key: string;
+  connections: number;
+}
+export interface Balance {
+  timestamp: string;
+  complete: boolean;
+  targets: BalanceGroup[];
+  zones: BalanceGroup[];
+  targetCV: number;
+  targetRatio: number | null;
+  zoneSkew: number;
+  zoneRatio: number | null;
 }
 export interface Sample {
   timestamp: string;
@@ -120,10 +164,16 @@ export function makeScenario(v: WizardValues): string {
       "Maximum clients must be a whole number between Clients and 1,000,000.",
     );
   if (!(v.rate > 0) || v.rate > 1000000)
-    throw new Error("Messages per client must be above 0 and at most 1,000,000.");
+    throw new Error(
+      "Messages per client must be above 0 and at most 1,000,000.",
+    );
   if (!(v.duration > 0)) throw new Error("Duration must be positive.");
   if (![0, 1, 2].includes(v.qos)) throw new Error("QoS must be 0, 1, or 2.");
-  if (!Number.isInteger(payloadSize) || payloadSize < 1 || payloadSize > 16 << 20)
+  if (
+    !Number.isInteger(payloadSize) ||
+    payloadSize < 1 ||
+    payloadSize > 16 << 20
+  )
     throw new Error("Payload size must be from 1 byte to 16 MiB.");
   const broker = v.broker.replace(/^tcp:/, "mqtt:").replace(/^ssl:/, "mqtts:");
   if (!/^(mqtt|mqtts|ws|wss):\/\/.+/.test(broker))
@@ -258,5 +308,7 @@ export function runWarnings(t: Test): string[] {
     out.push(
       `Lost workers: ${t.lostWorkers.join(", ")}. Their partitions stopped early; results include their last reported counters only.`,
     );
+  if (t.balance?.complete === false)
+    out.push("Broker telemetry was incomplete at the peak sample");
   return out;
 }

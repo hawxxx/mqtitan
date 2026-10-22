@@ -5,8 +5,8 @@ Examples assume a source build and a broker already running. Run `./bin/mqtitan 
 | Command | Purpose |
 | --- | --- |
 | `quick [flags]` | Generate and run a simple publishing scenario |
-| `validate FILE` | Validate YAML without contacting a broker |
-| `plan FILE` | Estimate resource requirements; estimates are not calibrated capacity |
+| `validate FILE` | Validate YAML without contacting a broker. Prints plan warnings (`WARN  ...`) and TLS key file findings (`WARN  secrets  client.key: ...`) before `VALID`; with `safety.strictSecrets` a key file with permissions wider than 0600 or inside a git work tree fails validation |
+| `plan FILE [--workers N] [--resolve]` | Estimate resource requirements; estimates are not calibrated capacity. `--workers N` (default 1) splits clients across N workers for the source-port warning; `--resolve` looks up the broker host (5 s timeout) and uses the number of answers as the destination count |
 | `run FILE [flags]` | Execute a saved scenario |
 | `serve [flags]` | Keep the API and embedded dashboard running |
 | `worker [flags]` | Register a distributed load generator |

@@ -1,0 +1,79 @@
+# Verifies that a network load balancer spreads new connections evenly across
+# brokers and zones. CLI-only: the TLS file paths below are rejected by the
+# API, so run it with `mqtitan run` without --controller and with
+# MQTITAN_CONTROLLER unset; otherwise the run goes to the controller API, which
+# rejects file paths and enforces MQTITAN_TELEMETRY_ALLOWED_HOSTS (use
+# certificate profiles for remote workers). Replace every example.com name,
+# the resolvers and the CIDRs.
+apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: nlb-balance
+broker:
+  url: mqtts://broker.example.com:443
+  version: "3.1.1"
+  connectTimeout: 10s
+  # Keep keepAlive at most half of idleTimeoutHint, or add the low-rate
+  # publisher below, otherwise the load balancer drops idle connections.
+  keepAlive: 45s
+  idleTimeoutHint: 100s
+  cleanStart: true
+  tls:
+    caFile: /etc/mqtitan/ca.pem
+    certFile: /etc/mqtitan/client.pem
+    keyFile: /etc/mqtitan/client.key
+    serverName: broker-01.zone-a.example.com
+    hostnameVerification: cn-fallback
+  dns:
+    resolveEachDial: true
+    # Public recursive resolvers cache for the record TTL. For a precise
+    # weighted-split measurement list the hosted zone's authoritative name
+    # servers here instead, as IP:53.
+    resolvers: ["8.8.8.8:53", "1.1.1.1:53"]
+    pick: random
+    family: ipv4
+  addressLabels:
+    - cidr: 192.0.2.0/24
+      label: legacy-nlb
+    - cidr: 198.51.100.0/24
+      label: new-nlb-1a
+clients:
+  count: 3000
+  idTemplate: mqtitan-${sequence:08}
+  lifetime:
+    min: 5m
+    max: 15m
+stages:
+  - duration: 1m
+    targetClients: 3000
+  - duration: 30m
+    targetClients: 3000
+workloads:
+  - name: connections
+    type: connection
+    clients: 3000
+  # Alternative to a short keepAlive: a low-rate publisher on a dedicated
+  # test topic keeps proxy idle timers alive.
+  # - name: keepalive
+  #   type: publisher
+  #   clients: 3000
+  #   topic: loadtest/${clientId}
+  #   qos: 0
+  #   ratePerClient: 0.02
+  #   payload:
+  #     type: static
+  #     value: "ping"
+telemetry:
+  interval: 15s
+  expectedTargets: 3
+  baseline: first
+  prometheus:
+    url: http://127.0.0.1:9090
+    query: "sum by (pod, zone) (emqx_live_connections_count)"
+thresholds:
+  connection_error_rate: "<1%"
+  broker_connection_cv: "<10%"
+  zone_connection_skew: "<15%"
+safety:
+  forbiddenTopicPrefixes: ["devices/", "telemetry/", "ops/"]
+  clientIdDenyRegex: "^[0-9a-fA-F]{12}$|^[A-Z0-9]{10}$"
+  strictSecrets: true

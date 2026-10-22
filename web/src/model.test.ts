@@ -132,6 +132,12 @@ describe("run warnings", () => {
     expect(w[0]).toContain("10.0%");
     expect(w[2]).toContain("w2");
   });
+  it("flags incomplete broker telemetry", () => {
+    const balance = { timestamp: "", complete: false, targets: [], zones: [], targetCV: 0, targetRatio: 1, zoneSkew: 0, zoneRatio: 1 };
+    const w = runWarnings({ ...base, snapshot: {}, balance } as unknown as Test);
+    expect(w).toEqual(["Broker telemetry was incomplete at the peak sample"]);
+    expect(runWarnings({ ...base, snapshot: {}, balance: { ...balance, complete: true } } as unknown as Test)).toEqual([]);
+  });
   it("stays quiet for a healthy run", () => {
     expect(
       runWarnings({ ...base, snapshot: { publishAttempts: 1000, publishSlotsMissed: 1, correlationRejected: 26, correlationSamples: 780000 } } as unknown as Test),

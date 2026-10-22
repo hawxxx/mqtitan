@@ -17,6 +17,7 @@ All examples use apiVersion mqtitan.io/v1alpha1 and kind Scenario. Validate befo
 | gateway.yaml | Clients that both publish and subscribe |
 | mqtt5.yaml | MQTT 5 QoS 1 correctness workload |
 | reconnect.yaml | Opt-in bounded reconnect with mixed clients |
+| nlb-balance.yaml | Load balancer spread across brokers and zones with DNS control, churn and Prometheus telemetry (CLI-only: TLS file paths) |
 
 Large files describe requested populations, not measured support. Do not execute them on a laptop or an unqualified production broker. Read ../docs/operations.md for port, memory, descriptor, NAT and generator limits. Change client ID prefixes between concurrent tests to avoid session takeover.
 

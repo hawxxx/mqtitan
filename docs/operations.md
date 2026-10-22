@@ -80,6 +80,10 @@ TLS connections use certificate verification. Install private CA certificates in
 
 Do not expose EMQX development dashboard ports to public networks. The container drops Linux capabilities and writes only its data volume and temporary directory. Image tags in the examples are versioned; for reproducible releases pin base and deployed images to verified digests in your release pipeline.
 
+## Source ports and idle timeouts
+
+When testing through a network load balancer, each worker source IP has about 28,000 ephemeral ports per destination `IP:port`, and a proxy idle timeout can drop connections that only send keepalives. Plan with `mqtitan plan --workers N --resolve` and read [scenario-spec](scenario-spec.md#idle-timeouts-and-source-ports) for `broker.idleTimeoutHint`, `keepAlive` and the source-port warning. The `examples/nlb-balance.yaml` scenario and `deploy/e2e/balance/run.sh` show a complete setup.
+
 ## Linux worker sizing
 
 Run mqtitan doctor on each worker host. Measure open file descriptors, resident memory, CPU, NIC throughput, dropped packets, connection ramp accuracy, publish pacing and TLS handshake cost. Set process/container file descriptor limits before startup; raising a host limit does not automatically raise the container's limit. Compose uses 65,536 as an initial ceiling, which is insufficient for some large-population runs.

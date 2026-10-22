@@ -2,6 +2,7 @@ package thresholds
 
 import (
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/emqx"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"math"
 	"regexp"
@@ -23,11 +24,16 @@ type expression struct {
 	latency  bool
 }
 
+func isBalance(name string) bool {
+	return name == "broker_connection_cv" || name == "zone_connection_skew"
+}
+
 var pattern = regexp.MustCompile(`^(<=|>=|<|>)([0-9]+(?:\.[0-9]+)?)(%|ns|us|µs|ms|s|m)$`)
 
 func parse(name, text string) (expression, error) {
 	latency := false
 	switch name {
+	case "broker_connection_cv", "zone_connection_skew":
 	case "connection_error_rate", "message_error_rate", "publish_error_rate", "subscribe_error_rate":
 	case "publish_latency_p50", "publish_latency_p95", "publish_latency_p99",
 		"connect_latency_p50", "connect_latency_p95", "connect_latency_p99",
@@ -54,7 +60,10 @@ func parse(name, text string) (expression, error) {
 		}
 		value = float64(d)
 	} else {
-		if m[3] != "%" || value > 100 {
+		if m[3] != "%" || (value > 100 && !isBalance(name)) {
+			if isBalance(name) {
+				return expression{}, fmt.Errorf("balance threshold requires a percentage")
+			}
 			return expression{}, fmt.Errorf("error rate requires percentage from 0 to 100")
 		}
 		value /= 100
@@ -70,7 +79,7 @@ func Validate(input map[string]string) error {
 	}
 	return nil
 }
-func Evaluate(input map[string]string, s metrics.Snapshot) ([]Result, error) {
+func Evaluate(input map[string]string, s metrics.Snapshot, b *emqx.Balance) ([]Result, error) {
 	names := make([]string, 0, len(input))
 	for n := range input {
 		names = append(names, n)
@@ -103,6 +112,16 @@ func Evaluate(input map[string]string, s metrics.Snapshot) ([]Result, error) {
 			if valid {
 				value = float64(s.SubscribeErrors) / float64(attempts)
 			}
+		case "broker_connection_cv":
+			valid = b != nil && (!b.Complete || b.CVObserved())
+			if valid {
+				value = b.TargetCV
+			}
+		case "zone_connection_skew":
+			valid = b != nil && (!b.Complete || b.SkewObserved())
+			if valid {
+				value = b.ZoneSkew
+			}
 		case "connect_latency_p50":
 			value, valid = float64(s.ConnectP50), s.PeakConnected > 0
 		case "connect_latency_p95":
@@ -122,8 +141,9 @@ func Evaluate(input map[string]string, s metrics.Snapshot) ([]Result, error) {
 		case "publish_latency_p99":
 			value, valid = float64(s.P99), hasLatencySamples(s)
 		}
+		incomplete := isBalance(n) && valid && !b.Complete
 		passed := false
-		if valid {
+		if valid && !incomplete {
 			switch ex.operator {
 			case "<":
 				passed = value < ex.limit
@@ -136,7 +156,9 @@ func Evaluate(input map[string]string, s metrics.Snapshot) ([]Result, error) {
 			}
 		}
 		observed := "no observations"
-		if valid {
+		if incomplete {
+			observed = "incomplete broker telemetry"
+		} else if valid {
 			if ex.latency {
 				observed = time.Duration(value).String()
 			} else {

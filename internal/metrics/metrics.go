@@ -4,6 +4,8 @@ import (
 	"errors"
 	hdr "github.com/HdrHistogram/hdrhistogram-go"
 	"math"
+	"net/netip"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,6 +64,8 @@ type Counters struct {
 	PublishCancelled   atomic.Uint64
 	BytesSent          atomic.Uint64
 	Reconnects         atomic.Uint64
+	Churned            atomic.Uint64
+	ChurnReconnects    atomic.Uint64
 	Disconnects        atomic.Uint64
 	// PublishSlotsMissed counts scheduled publish slots skipped because the
 	// previous publish of that client had not completed: the generator, or
@@ -74,7 +78,20 @@ type Counters struct {
 	nextShard           atomic.Uint64
 	shards              [shardCount]latencyShard
 	errors              [len(errorCategories)]atomic.Uint64
+	connectFailures     [len(connectStages)]atomic.Uint64
+	connackReasons      [256]atomic.Uint64
+	remotes             labelSet[netip.AddrPort]
+	dnsAnswers          labelSet[netip.Addr]
+	dnsErrors           labelSet[netip.AddrPort]
+	labelCfg            atomic.Pointer[labelConfig]
 }
+
+// connectStages mirrors the stage constants in internal/mqtt; the last entry
+// ("other") absorbs unknown stages so the stage counts always sum to ConnectErrors.
+var connectStages = [...]string{"dns", "tcp", "tls_handshake", "tls_verify_chain", "tls_verify_hostname", "tls_alert", "websocket_upgrade", "mqtt_connack", "timeout", "other"}
+
+// ConnectStages returns the bounded connect failure stages in stable order.
+func ConnectStages() []string { return connectStages[:] }
 
 // errorCategories are the bounded error classes; "timeout" is an operation
 // that exceeded operationTimeout, which the client then closed itself.
@@ -98,6 +115,22 @@ func (c *Counters) RecordError(category string) {
 		}
 	}
 	c.errors[i].Add(1)
+}
+
+// RecordConnectFailure counts one classified connect failure; code is the
+// CONNACK code for mqtt_connack and negative otherwise. It does not allocate.
+func (c *Counters) RecordConnectFailure(stage string, code int) {
+	i := len(connectStages) - 1
+	for j, name := range connectStages {
+		if name == stage {
+			i = j
+			break
+		}
+	}
+	c.connectFailures[i].Add(1)
+	if code >= 0 && code < len(c.connackReasons) {
+		c.connackReasons[code].Add(1)
+	}
 }
 func (c *Counters) record(shard int, kind byte, d time.Duration) {
 	c.recordCorrected(shard, kind, d, 0)
@@ -185,10 +218,18 @@ type Snapshot struct {
 	SubscribeErrors     uint64            `json:"subscribeErrors"`
 	CorrelationSamples  uint64            `json:"correlationSamples"`
 	Reconnects          uint64            `json:"reconnects"`
+	Churned             uint64            `json:"churned,omitempty"`
+	ChurnReconnects     uint64            `json:"churnReconnects,omitempty"`
 	Disconnects         uint64            `json:"disconnects"`
 	PublishSlotsMissed  uint64            `json:"publishSlotsMissed"`
 	CorrelationRejected uint64            `json:"correlationRejected"`
 	Errors              map[string]uint64 `json:"errors,omitempty"`
+	ConnectFailures     map[string]uint64 `json:"connectFailures,omitempty"`
+	ConnackReasons      map[string]uint64 `json:"connackReasons,omitempty"`
+	RemoteAddresses     []LabelCount      `json:"remoteAddresses,omitempty"`
+	AddressLabels       []LabelCount      `json:"addressLabels,omitempty"`
+	DNSAnswers          []LabelCount      `json:"dnsAnswers,omitempty"`
+	DNSErrors           []LabelCount      `json:"dnsErrors,omitempty"`
 	ConnectP50          time.Duration     `json:"connectP50"`
 	ConnectP95          time.Duration     `json:"connectP95"`
 	ConnectP99          time.Duration     `json:"connectP99"`
@@ -214,7 +255,7 @@ type Bucket struct {
 }
 
 func (c *Counters) Snapshot() Snapshot {
-	s := Snapshot{ConnectAttempts: c.ConnectAttempts.Load(), Connected: c.Connected.Load(), TargetClients: c.TargetClients.Load(), Connecting: c.Connecting.Load(), PeakConnected: c.PeakConnected.Load(), ConnectErrors: c.ConnectErrors.Load(), PublishAttempts: c.PublishAttempts.Load(), Published: c.Published.Load(), PublishErrors: c.PublishErrors.Load(), BytesSent: c.BytesSent.Load(), Received: c.Received.Load(), BytesReceived: c.BytesReceived.Load(), Subscriptions: c.Subscriptions.Load(), SubscribeErrors: c.SubscribeErrors.Load(), CorrelationSamples: c.CorrelationSamples.Load(), Reconnects: c.Reconnects.Load(), Disconnects: c.Disconnects.Load(), Errors: map[string]uint64{}}
+	s := Snapshot{ConnectAttempts: c.ConnectAttempts.Load(), Connected: c.Connected.Load(), TargetClients: c.TargetClients.Load(), Connecting: c.Connecting.Load(), PeakConnected: c.PeakConnected.Load(), ConnectErrors: c.ConnectErrors.Load(), PublishAttempts: c.PublishAttempts.Load(), Published: c.Published.Load(), PublishErrors: c.PublishErrors.Load(), BytesSent: c.BytesSent.Load(), Received: c.Received.Load(), BytesReceived: c.BytesReceived.Load(), Subscriptions: c.Subscriptions.Load(), SubscribeErrors: c.SubscribeErrors.Load(), CorrelationSamples: c.CorrelationSamples.Load(), Reconnects: c.Reconnects.Load(), Churned: c.Churned.Load(), ChurnReconnects: c.ChurnReconnects.Load(), Disconnects: c.Disconnects.Load(), Errors: map[string]uint64{}}
 	s.ConnectCancelled = c.ConnectCancelled.Load()
 	s.PublishCancelled = c.PublishCancelled.Load()
 	s.PublishSlotsMissed = c.PublishSlotsMissed.Load()
@@ -224,6 +265,23 @@ func (c *Counters) Snapshot() Snapshot {
 			s.Errors[name] = n
 		}
 	}
+	for i, name := range connectStages {
+		if n := c.connectFailures[i].Load(); n > 0 {
+			if s.ConnectFailures == nil {
+				s.ConnectFailures = map[string]uint64{}
+			}
+			s.ConnectFailures[name] = n
+		}
+	}
+	for code := range c.connackReasons {
+		if n := c.connackReasons[code].Load(); n > 0 {
+			if s.ConnackReasons == nil {
+				s.ConnackReasons = map[string]uint64{}
+			}
+			s.ConnackReasons[strconv.Itoa(code)] = n
+		}
+	}
+	c.fillLabels(&s)
 	p, e, k, summary := c.merged()
 	s.PublishLatencyCount = summary.count
 	s.PublishLatencySum = summary.sum
@@ -345,6 +403,8 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 		out.SubscribeErrors += s.SubscribeErrors
 		out.CorrelationSamples += s.CorrelationSamples
 		out.Reconnects += s.Reconnects
+		out.Churned += s.Churned
+		out.ChurnReconnects += s.ChurnReconnects
 		out.Disconnects += s.Disconnects
 		out.PublishSlotsMissed += s.PublishSlotsMissed
 		out.CorrelationRejected += s.CorrelationRejected
@@ -359,6 +419,12 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 				out.Errors[name] += n
 			}
 		}
+		out.ConnectFailures = mergeStages(out.ConnectFailures, s.ConnectFailures)
+		out.ConnackReasons = mergeCodes(out.ConnackReasons, s.ConnackReasons)
+		out.RemoteAddresses = mergeLabelCounts(out.RemoteAddresses, s.RemoteAddresses)
+		out.AddressLabels = mergeLabelCounts(out.AddressLabels, s.AddressLabels)
+		out.DNSAnswers = mergeLabelCounts(out.DNSAnswers, s.DNSAnswers)
+		out.DNSErrors = mergeLabelCounts(out.DNSErrors, s.DNSErrors)
 	}
 	p, e, k := histogram(), histogram(), histogram()
 	for _, d := range distributions {
@@ -380,4 +446,51 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 		out.Avg = time.Duration(int64(out.PublishLatencySum) / int64(out.PublishLatencyCount))
 	}
 	return out
+}
+
+// mergeStages adds src into dst over the known stages only; unknown keys from
+// untrusted worker reports fold into "other" so the sum stays equal to ConnectErrors.
+func mergeStages(dst, src map[string]uint64) map[string]uint64 {
+	other := connectStages[len(connectStages)-1]
+	for k, n := range src {
+		if n == 0 {
+			continue
+		}
+		known := false
+		for _, name := range connectStages {
+			if name == k {
+				known = true
+				break
+			}
+		}
+		if !known {
+			k = other
+		}
+		if dst == nil {
+			dst = map[string]uint64{}
+		}
+		dst[k] += n
+	}
+	return dst
+}
+
+// ParseConnackCode accepts only decimal CONNACK codes 0-255.
+func ParseConnackCode(key string) (int, bool) {
+	v, err := strconv.Atoi(key)
+	return v, err == nil && v >= 0 && v <= 255
+}
+
+// mergeCodes adds src into dst, dropping keys that are not valid CONNACK codes.
+func mergeCodes(dst, src map[string]uint64) map[string]uint64 {
+	for k, n := range src {
+		v, ok := ParseConnackCode(k)
+		if !ok || n == 0 {
+			continue
+		}
+		if dst == nil {
+			dst = map[string]uint64{}
+		}
+		dst[strconv.Itoa(v)] += n
+	}
+	return dst
 }

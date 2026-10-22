@@ -12,6 +12,8 @@ import (
 	transport "github.com/mqtitan/mqtitan/internal/mqtt"
 	"github.com/mqtitan/mqtitan/internal/payload"
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	mrand "math/rand/v2"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -23,7 +25,18 @@ type Engine struct {
 	Control        *Control
 	runID          [16]byte
 	connector      *transport.Connector
+	// churnDelay overrides [churnDelayMin, churnDelayMax] in tests.
+	churnDelay [2]time.Duration
 }
+
+// A churned client waits a jittered pause before reconnecting with the same
+// client ID, so the broker can finish closing the previous session instead of
+// refusing the new one (EMQX answers CONNACK 3, server unavailable).
+const (
+	churnDelayMin = 100 * time.Millisecond
+	churnDelayMax = time.Second
+)
+
 type worker struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -46,7 +59,18 @@ func (e *Engine) Run(ctx context.Context) error {
 	if rate <= 0 {
 		rate = 500
 	}
-	connector, err := transport.NewConnector(e.Scenario.Broker)
+	var prefixes []netip.Prefix
+	var labels []string
+	for _, l := range e.Scenario.Broker.AddressLabels {
+		p, err := scenario.ParseAddressPrefix(l.CIDR)
+		if err != nil {
+			return fmt.Errorf("broker.addressLabels: %w", err)
+		}
+		prefixes = append(prefixes, p)
+		labels = append(labels, l.Label)
+	}
+	e.Metrics.SetAddressLabels(prefixes, labels)
+	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, Seed: e.dialSeed(), StrictSecrets: e.Scenario.Safety.StrictSecrets})
 	if err != nil {
 		return err
 	}
@@ -160,10 +184,35 @@ func (e *Engine) runClient(ctx context.Context, seq int) {
 	// Only a session after one that connected is a reconnect; retries of a
 	// client that never connected are connection attempts.
 	everConnected := false
+	kind := sessionFirst
+	lives := 0
 	for {
-		up := e.runSession(ctx, seq, everConnected, g)
+		up, churned := e.runSession(ctx, seq, kind, lives, g)
+		lives++
 		everConnected = everConnected || up > 0
-		if ctx.Err() != nil || !r.Enabled {
+		if ctx.Err() != nil {
+			return
+		}
+		if churned {
+			// A planned end is neither a failure nor a retry: reconnect after a
+			// short jittered pause.
+			kind = sessionChurn
+			retries = 0
+			backoff = initial
+			timer := time.NewTimer(e.churnDelayFor(seq, lives))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			continue
+		}
+		kind = sessionFirst
+		if everConnected {
+			kind = sessionReconnect
+		}
+		if !r.Enabled {
 			return
 		}
 		// A session that stayed connected for at least maxBackoff ends an outage;
@@ -190,6 +239,38 @@ func (e *Engine) runClient(ctx context.Context, seq int) {
 		}
 	}
 }
+
+// lifetimeFor draws the n-th session lifetime of client seq uniformly from the
+// configured [min, max]; it is deterministic for a given seed. The global
+// sequence keeps distributed partitions from churning in lockstep.
+func (e *Engine) lifetimeFor(seq, n int) time.Duration {
+	l := e.Scenario.Clients.Lifetime
+	return e.draw(l.Min.Duration, l.Max.Duration, e.Scenario.Seed, seq, n)
+}
+
+// churnDelayFor draws the pause before the n-th churn reconnect of client seq.
+func (e *Engine) churnDelayFor(seq, n int) time.Duration {
+	lo, hi := churnDelayMin, churnDelayMax
+	if e.churnDelay[1] > 0 {
+		lo, hi = e.churnDelay[0], e.churnDelay[1]
+	}
+	return e.draw(lo, hi, e.Scenario.Seed^0x636875726e /* "churn" */, seq, n)
+}
+
+func (e *Engine) draw(lo, hi time.Duration, seed uint64, seq, n int) time.Duration {
+	if hi <= lo {
+		return lo
+	}
+	global := uint64(seq + e.Scenario.Clients.SequenceOffset)
+	r := mrand.New(mrand.NewPCG(seed, global<<32|uint64(n)))
+	return lo + time.Duration(r.Int64N(int64(hi-lo)+1))
+}
+
+// dialSeed seeds the dialer's address shuffle; mixing in the partition offset
+// keeps distributed workers from picking the same addresses in lockstep.
+func (e *Engine) dialSeed() uint64 {
+	return e.Scenario.Seed ^ uint64(e.Scenario.Clients.SequenceOffset)*0x9e3779b97f4a7c15
+}
 func (e *Engine) generator(seq int) (*payload.Generator, error) {
 	w := e.workload(seq)
 	globalSeq := seq + e.Scenario.Clients.SequenceOffset
@@ -198,8 +279,17 @@ func (e *Engine) generator(seq int) (*payload.Generator, error) {
 	return payload.New(payload.Spec{Type: w.Payload.Type, Value: value, Size: w.Payload.Size}, payload.Variables{ClientID: id, Worker: e.Scenario.Clients.Worker, Sequence: globalSeq, Seed: e.Scenario.Seed})
 }
 
-// runSession returns how long the session stayed connected; zero when connecting failed.
-func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *payload.Generator) (up time.Duration) {
+type sessionKind uint8
+
+const (
+	sessionFirst     sessionKind = iota // first attempt, or a retry before any connect
+	sessionReconnect                    // after a session that failed
+	sessionChurn                        // after a session ended by its lifetime
+)
+
+// runSession returns how long the session stayed connected (zero when
+// connecting failed) and whether the client's lifetime ended it.
+func (e *Engine) runSession(ctx context.Context, seq int, kind sessionKind, life int, g *payload.Generator) (up time.Duration, churned bool) {
 	w := e.workload(seq)
 	globalSeq := seq + e.Scenario.Clients.SequenceOffset
 	expand := func(template, clientID string) string {
@@ -230,20 +320,39 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 			return
 		}
 		e.Metrics.ConnectErrors.Add(1)
+		f := transport.Classify(err)
+		e.Metrics.RecordConnectFailure(f.Stage, f.Code)
 		e.Metrics.RecordError("connect")
 		return
 	}
 	connectedAt := time.Now()
 	e.Metrics.RecordConnectionLatencyFor(seq, connectedAt.Sub(connectStarted))
-	if reconnecting {
+	switch kind {
+	case sessionReconnect:
 		e.Metrics.Reconnects.Add(1)
+	case sessionChurn:
+		e.Metrics.ChurnReconnects.Add(1)
 	}
 	e.Metrics.ClientConnected()
+	e.Metrics.RecordRemote(c.RemoteAddr())
 	// A session ended by a recorded subscribe failure is not an unexpected disconnect.
 	failed := false
+	var lifetime <-chan time.Time
+	if e.Scenario.Clients.Lifetime != nil {
+		t := time.NewTimer(e.lifetimeFor(seq, life))
+		defer t.Stop()
+		lifetime = t.C
+	}
+	// expire ends the session cleanly when its lifetime fires.
+	expire := func() {
+		churned, failed = true, true
+		e.Metrics.Churned.Add(1)
+		c.Disconnect()
+	}
 	defer func() {
 		up = time.Since(connectedAt)
 		c.Close()
+		e.Metrics.ReleaseRemote(c.RemoteAddr())
 		e.Metrics.Connected.Add(-1)
 		e.Metrics.Disconnects.Add(1)
 		if ctx.Err() == nil && !failed {
@@ -270,6 +379,8 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 		select {
 		case <-ctx.Done():
 		case <-c.Done():
+		case <-lifetime:
+			expire()
 		}
 		return
 	}
@@ -311,6 +422,9 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 		case <-ctx.Done():
 			return
 		case <-c.Done():
+			return
+		case <-lifetime:
+			expire()
 			return
 		case <-changed:
 			load, changed = e.Control.Current()

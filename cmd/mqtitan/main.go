@@ -5,13 +5,16 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/mqtt"
 	"github.com/mqtitan/mqtitan/internal/observability"
 	"github.com/mqtitan/mqtitan/internal/platform"
 	"github.com/mqtitan/mqtitan/internal/scenario"
 	"github.com/mqtitan/mqtitan/internal/thresholds"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -63,23 +66,10 @@ func run(args []string) error {
 		return errors.New("command required")
 	}
 	switch args[0] {
-	case "validate", "plan":
-		if len(args) != 2 {
-			return errors.New("usage: mqtitan " + args[0] + " SCENARIO")
-		}
-		s, err := scenario.Load(args[1])
-		if err != nil {
-			return err
-		}
-		if err = thresholds.Validate(s.Thresholds); err != nil {
-			return err
-		}
-		if args[0] == "validate" {
-			fmt.Printf("VALID %s\n", s.Name)
-		} else {
-			printPlan(s)
-		}
-		return nil
+	case "validate":
+		return validateCommand(os.Stdout, args[1:])
+	case "plan":
+		return planCommand(os.Stdout, args[1:])
 	case "run":
 		return runScenario(args[1:])
 	case "quick":
@@ -157,17 +147,135 @@ func quick(args []string) error {
 	}
 	return executeScenario(string(raw), *opts)
 }
-func printPlan(s scenario.Scenario) {
-	p := s.Plan()
-	fmt.Printf("Scenario: %s\nPeak clients: %d\nDuration: %s\nExpected publish rate: %.0f msg/s\nEstimated payload wire rate: %.2f MiB/s\nEstimated memory (uncalibrated): %.2f GiB\nEstimated file descriptors: %d\n", s.Name, p.PeakClients, p.Duration, p.MessagesPerSecond, p.EstimatedWireBytesPerSecond/1024/1024, float64(p.EstimatedMemoryBytes)/1024/1024/1024, p.EstimatedFileDescriptors)
-	for _, w := range p.Warnings {
-		fmt.Printf("WARN  workload             %s\n", w)
+
+// parseScenarioArgs takes the scenario path first or last, like runScenario.
+func parseScenarioArgs(name string, args []string, f *flag.FlagSet) (scenario.Scenario, error) {
+	path := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		path, args = args[0], args[1:]
+	}
+	if err := f.Parse(args); err != nil {
+		return scenario.Scenario{}, err
+	}
+	if path == "" && f.NArg() == 1 {
+		path = f.Arg(0)
+	} else if f.NArg() != 0 {
+		return scenario.Scenario{}, errors.New("unexpected positional arguments")
+	}
+	if path == "" {
+		return scenario.Scenario{}, errors.New("usage: mqtitan " + name + " SCENARIO")
+	}
+	s, err := scenario.Load(path)
+	if err != nil {
+		return s, err
+	}
+	return s, thresholds.Validate(s.Thresholds)
+}
+
+func validateCommand(w io.Writer, args []string) error {
+	f := flag.NewFlagSet("validate", flag.ContinueOnError)
+	s, err := parseScenarioArgs("validate", args, f)
+	if err != nil {
+		return err
+	}
+	for _, msg := range s.Plan().Warnings {
+		fmt.Fprintf(w, "WARN  workload             %s\n", msg)
+	}
+	for _, finding := range mqtt.CheckSecretFiles(s.Broker.TLS) {
+		fmt.Fprintf(w, "WARN  secrets  %s: %s\n", finding.File, finding.Problem)
+	}
+	if s.Safety.StrictSecrets && s.Broker.TLS.KeyFile != "" {
+		for _, finding := range mqtt.CheckSecretFiles(scenario.TLS{KeyFile: s.Broker.TLS.KeyFile}) {
+			if !strings.HasPrefix(finding.Problem, "file not found") {
+				return fmt.Errorf("refusing key file %s: %s (safety.strictSecrets)", finding.File, finding.Problem)
+			}
+		}
+	}
+	fmt.Fprintf(w, "VALID %s\n", s.Name)
+	return nil
+}
+
+func planCommand(w io.Writer, args []string) error {
+	f := flag.NewFlagSet("plan", flag.ContinueOnError)
+	workers := f.Int("workers", 1, "worker count the clients are split across")
+	resolve := f.Bool("resolve", false, "resolve the broker host to count destination addresses")
+	s, err := parseScenarioArgs("plan", args, f)
+	if err != nil {
+		return err
+	}
+	if *workers < 1 || *workers > 256 {
+		return errors.New("--workers must be between 1 and 256")
+	}
+	opts := scenario.PlanOptions{Workers: *workers}
+	var resolveWarn string
+	if *resolve {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		answers, err := mqtt.ResolveBroker(ctx, s.Broker)
+		cancel()
+		if err != nil || len(answers) == 0 {
+			resolveWarn = fmt.Sprintf("WARN  dns  resolution failed; using %d assumed destination address(es)\n", max(len(s.Broker.AddressLabels), 1))
+		} else {
+			opts.Destinations = len(answers)
+		}
+	}
+	printPlan(w, s, s.PlanWith(opts))
+	fmt.Fprint(w, resolveWarn)
+	return nil
+}
+
+func printPlan(w io.Writer, s scenario.Scenario, p scenario.Plan) {
+	fmt.Fprintf(w, "Scenario: %s\nPeak clients: %d\nDuration: %s\nExpected publish rate: %.0f msg/s\nEstimated payload wire rate: %.2f MiB/s\nEstimated memory (uncalibrated): %.2f GiB\nEstimated file descriptors: %d\n", s.Name, p.PeakClients, p.Duration, p.MessagesPerSecond, p.EstimatedWireBytesPerSecond/1024/1024, float64(p.EstimatedMemoryBytes)/1024/1024/1024, p.EstimatedFileDescriptors)
+	if l := s.Clients.Lifetime; l != nil {
+		fmt.Fprintf(w, "Lifetime churn: %s to %s (~%.1f connects/s at peak)\n", l.Min.Duration, l.Max.Duration, p.ChurnConnectsPerSecond)
+	}
+	tlsScheme := strings.HasPrefix(s.Broker.URL, "mqtts://") || strings.HasPrefix(s.Broker.URL, "wss://")
+	if tlsScheme {
+		mode := s.Broker.TLS.HostnameVerification
+		if mode == "" {
+			mode = "san"
+		}
+		fmt.Fprintf(w, "TLS hostname verification: %s\n", mode)
+	}
+	if d := s.Broker.DNS; d != nil {
+		var parts []string
+		if d.ResolveEachDial {
+			parts = append(parts, "resolveEachDial")
+		}
+		if len(d.Resolvers) > 0 {
+			parts = append(parts, fmt.Sprintf("%d resolvers", len(d.Resolvers)))
+		}
+		if d.Pick != "" {
+			parts = append(parts, "pick "+d.Pick)
+		}
+		if d.Family != "" && d.Family != "any" {
+			parts = append(parts, d.Family)
+		}
+		fmt.Fprintf(w, "dns: %s\n", strings.Join(parts, ", "))
+	}
+	if n := len(s.Broker.AddressLabels); n > 0 {
+		fmt.Fprintf(w, "Address labels: %d address label(s)\n", n)
+	}
+	for _, msg := range p.Warnings {
+		fmt.Fprintf(w, "WARN  workload             %s\n", msg)
+	}
+	sf := s.Safety
+	if len(sf.ForbiddenTopicPrefixes) > 0 || sf.ClientIDDenyRegex != "" {
+		var parts []string
+		if n := len(sf.ForbiddenTopicPrefixes); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d forbidden prefixes", n))
+		}
+		if sf.ClientIDDenyRegex != "" {
+			parts = append(parts, fmt.Sprintf("client ID rule checked on %d IDs", s.Clients.Count))
+		}
+		fmt.Fprintf(w, "OK    safety  %s\n", strings.Join(parts, ", "))
+	} else if tlsScheme && !sf.StrictSecrets {
+		fmt.Fprintln(w, "WARN  safety  no forbiddenTopicPrefixes set")
 	}
 	for _, c := range platform.AssessPlan(platform.PlanInputs{Clients: int64(p.PeakClients), FileDescriptors: int64(p.EstimatedFileDescriptors), MemoryBytes: p.EstimatedMemoryBytes, WireBytesPerSecond: p.EstimatedWireBytesPerSecond}, platform.CurrentCapacity()) {
-		fmt.Printf("%-5s %-20s %s", c.Status, c.Name, c.Value)
+		fmt.Fprintf(w, "%-5s %-20s %s", c.Status, c.Name, c.Value)
 		if c.Recommendation != "" {
-			fmt.Printf("  %s", c.Recommendation)
+			fmt.Fprintf(w, "  %s", c.Recommendation)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
 }

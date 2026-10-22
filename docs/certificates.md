@@ -33,13 +33,17 @@ Use an actual profile ID from your controller. Profile references are controller
 - Listing/upload responses return only profile metadata, including fingerprint and expiry. Private keys are never downloadable through the certificate API or included in test reports.
 - Controller and trusted workers necessarily handle decrypted credentials in memory to establish TLS connections. Workers receive resolved PEM data over their authenticated controller connection, not local filesystem paths. **Use HTTPS for remote dashboard and worker/controller traffic.** Browser uploads over non-loopback HTTP are blocked; configure TLS termination at the reverse proxy for remote installations.
 - These profiles share the controller's administrative authentication boundary; there is no per-user profile isolation/RBAC. Treat every authorized worker and administrator as trusted with load-test credentials.
-- TLS verification remains enabled. Do not use certificate uploads to bypass server-name validation.
+- TLS verification remains enabled. Certificate uploads do not bypass server-name validation. For brokers whose certificate only carries a Common Name, `broker.tls.hostnameVerification: cn-fallback` keeps chain and name verification, `none` keeps chain verification only, and `insecureSkipVerify` disables both.
 
 If the AWS load balancer terminates TLS, client TLS credentials authenticate to that load balancer. Configure the load balancer/HAProxy separately for backend TLS or certificate forwarding. The tool does not configure or automatically bridge those trust boundaries.
 
 ## API
 
 `POST /api/v1/certificates` accepts `name`, optional `caPem`, and optional paired `certPem`/`keyPem`. `GET /api/v1/certificates` lists metadata only. Both use the existing control-plane authentication. Material is not exposed by a GET endpoint. Create a new profile when rotating certificates; profile update/delete is not currently implemented.
+
+## Remote workers and mTLS material
+
+Certificate profiles are the way to give remote workers mTLS material: API submissions reject `caFile`, `certFile` and `keyFile` paths, and the controller sends resolved PEM data to workers. Files referenced by path work only for standalone CLI runs (`mqtitan run` without `--controller` and with `MQTITAN_CONTROLLER` unset, since that variable supplies the default `--controller`), where `safety.strictSecrets` can check them. A run that reaches the controller API rejects the file paths and applies `MQTITAN_TELEMETRY_ALLOWED_HOSTS` to telemetry. There is no profile delete API, so for short-lived lab credentials use a dedicated controller database and delete it together with its `.key` file afterwards.
 
 ## Storage lifecycle
 
