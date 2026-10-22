@@ -139,6 +139,7 @@ workloads: [{type: publisher, clients: 2, topic: test, qos: 0, ratePerClient: 1,
 		{"valid", "{cidr: '198.51.100.0/24', label: a}, {cidr: '2001:db8::/32', label: b}, {cidr: '198.51.100.0/28', label: a}", ""},
 		{"bad cidr", "{cidr: '198.51.100.0/33', label: a}", "broker.addressLabels[0].cidr is not a valid CIDR"},
 		{"empty label", "{cidr: '198.51.100.0/24', label: ''}", "broker.addressLabels[0].label is required"},
+		{"mapped", "{cidr: '::ffff:198.51.100.0/120', label: a}", "broker.addressLabels[0].cidr must be an IPv4 or IPv6 prefix, not IPv4-mapped"},
 		{"duplicate", "{cidr: '198.51.100.0/24', label: a}, {cidr: '198.51.100.0/24', label: b}", "broker.addressLabels[1].cidr duplicates"},
 		{"too many", strings.Join(many, ","), "broker.addressLabels allows at most 256 entries"},
 	} {

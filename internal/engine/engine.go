@@ -50,11 +50,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	var prefixes []netip.Prefix
 	var labels []string
 	for _, l := range e.Scenario.Broker.AddressLabels {
-		p, err := netip.ParsePrefix(l.CIDR)
+		p, err := scenario.ParseAddressPrefix(l.CIDR)
 		if err != nil {
 			return fmt.Errorf("broker.addressLabels: %w", err)
 		}
-		prefixes = append(prefixes, netip.PrefixFrom(p.Addr().Unmap(), p.Bits()))
+		prefixes = append(prefixes, p)
 		labels = append(labels, l.Label)
 	}
 	e.Metrics.SetAddressLabels(prefixes, labels)

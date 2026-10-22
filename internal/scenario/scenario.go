@@ -229,11 +229,10 @@ func (s Scenario) Validate() error {
 	} else {
 		seen := map[netip.Prefix]bool{}
 		for i, l := range s.Broker.AddressLabels {
-			p, err := netip.ParsePrefix(l.CIDR)
+			p, err := ParseAddressPrefix(l.CIDR)
 			if err != nil {
-				problems = append(problems, fmt.Sprintf("broker.addressLabels[%d].cidr is not a valid CIDR", i))
+				problems = append(problems, fmt.Sprintf("broker.addressLabels[%d].cidr %v", i, err))
 			} else {
-				p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()).Masked()
 				if seen[p] {
 					problems = append(problems, fmt.Sprintf("broker.addressLabels[%d].cidr duplicates an earlier entry", i))
 				}
@@ -373,4 +372,18 @@ func (s Scenario) Plan() Plan {
 		}
 	}
 	return Plan{peak, duration, rate, payload, int64(peak) * 96 * 1024, peak*2 + 128, rate * float64(payload+64), warnings}
+}
+
+// ParseAddressPrefix parses a broker.addressLabels CIDR into its masked form.
+// IPv4-mapped IPv6 prefixes are rejected: their bit count is relative to the
+// 128-bit address and cannot be unmapped without changing the range.
+func ParseAddressPrefix(cidr string) (netip.Prefix, error) {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return netip.Prefix{}, errors.New("is not a valid CIDR")
+	}
+	if p.Addr().Is4In6() {
+		return netip.Prefix{}, fmt.Errorf("must be an IPv4 or IPv6 prefix, not IPv4-mapped (use %s)", "an IPv4 CIDR such as 198.51.100.0/24")
+	}
+	return p.Masked(), nil
 }
