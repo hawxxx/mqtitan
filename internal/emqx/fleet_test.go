@@ -20,7 +20,7 @@ func nodesServer(t *testing.T, live string, status int) *httptest.Server {
 				w.WriteHeader(status)
 				return
 			}
-			_, _ = w.Write([]byte(`[{"node":"emqx@a","node_status":"running","live_connections":` + live + `}]`))
+			_, _ = w.Write([]byte(`[{"node":"emqx@` + r.Host + `","node_status":"running","live_connections":` + live + `}]`))
 		case "/api/v5/metrics":
 			w.WriteHeader(500)
 		default:
@@ -147,5 +147,43 @@ func TestFleetNeverSendsCredentialsToDisallowedHost(t *testing.T) {
 	}
 	if _, ok := HostAllowed([]string{"host.example.net:9090"}, "http://host.example.net:80"); ok {
 		t.Error("port-specific entry matched another port")
+	}
+}
+
+func TestFetchFleetRejectsClusteredTarget(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v5/nodes" {
+			_, _ = w.Write([]byte(`[{"node":"emqx@a","live_connections":10},{"node":"emqx@b","live_connections":12}]`))
+			return
+		}
+		w.WriteHeader(500)
+	}))
+	defer s.Close()
+	good := nodesServer(t, "5", 200)
+	tel := scenario.Telemetry{EMQX: []scenario.EMQXTarget{{Name: "a", URL: s.URL}, {Name: "b", URL: good.URL}}}
+	f := FetchFleet(t.Context(), tel, testCreds, nil)
+	if f.Complete || f.Targets[0].Error != "target reports 2 nodes; one node per target required" || f.Targets[1].Error != "" {
+		t.Fatalf("%+v", f)
+	}
+	if n := f.Targets[0].Nodes; len(n) != 2 || n[0] != "emqx@a" || n[1] != "emqx@b" {
+		t.Fatalf("nodes %v", n)
+	}
+}
+
+func TestFetchFleetRejectsTargetsSharingANode(t *testing.T) {
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v5/nodes" {
+			_, _ = w.Write([]byte(`[{"node":"emqx@shared","live_connections":10}]`))
+			return
+		}
+		w.WriteHeader(500)
+	}))
+	defer s.Close()
+	other := nodesServer(t, "5", 200)
+	tel := scenario.Telemetry{EMQX: []scenario.EMQXTarget{{Name: "a", URL: s.URL}, {Name: "c", URL: other.URL}, {Name: "b", URL: s.URL}}}
+	f := FetchFleet(t.Context(), tel, testCreds, nil)
+	want := "targets a and b report the same node emqx@shared"
+	if f.Complete || f.Targets[0].Error != want || f.Targets[2].Error != want || f.Targets[1].Error != "" {
+		t.Fatalf("%+v", f)
 	}
 }

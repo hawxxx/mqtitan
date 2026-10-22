@@ -21,11 +21,12 @@ const (
 
 // TargetSample is one broker target's connection count at a point in time.
 type TargetSample struct {
-	Target      string  `json:"target"`
-	Zone        string  `json:"zone"`
-	Connections float64 `json:"connections"` // after baseline subtraction, clamped at 0
-	Raw         float64 `json:"raw"`         // as reported
-	Error       string  `json:"error,omitempty"`
+	Target      string   `json:"target"`
+	Zone        string   `json:"zone"`
+	Connections float64  `json:"connections"`     // after baseline subtraction, clamped at 0
+	Raw         float64  `json:"raw"`             // as reported
+	Nodes       []string `json:"nodes,omitempty"` // EMQX node names behind the target
+	Error       string   `json:"error,omitempty"`
 }
 
 // FleetSample is one poll of every telemetry target. Source is "emqx" or
@@ -132,8 +133,15 @@ func fetchEMQX(ctx context.Context, hc *http.Client, t scenario.Telemetry, c Cre
 			}
 			client := &Client{BaseURL: tg.URL, APIKey: c.APIKey, APISecret: c.APISecret, HTTPClient: hc, MaxResponseBytes: maxResponseBytes}
 			snap, err := client.Fetch(ctx)
+			for _, n := range snap.Nodes {
+				ts.Nodes = append(ts.Nodes, n.Name)
+			}
 			// Fetch joins a metrics-endpoint error even when nodes succeeded.
-			if snap.Connections != nil {
+			// A clustered target or a Service spreading requests over pods
+			// would report fleet-wide totals and hide any imbalance.
+			if len(ts.Nodes) > 1 {
+				ts.Error = fmt.Sprintf("target reports %d nodes; one node per target required", len(ts.Nodes))
+			} else if snap.Connections != nil {
 				ts.Raw, ts.Connections = *snap.Connections, *snap.Connections
 			} else {
 				ts.Error = "connections unavailable"
@@ -145,6 +153,22 @@ func fetchEMQX(ctx context.Context, hc *http.Client, t scenario.Telemetry, c Cre
 		}()
 	}
 	wg.Wait()
+	owner := map[string]int{}
+	for i, ts := range s.Targets {
+		if len(ts.Nodes) != 1 || ts.Nodes[0] == "" {
+			continue
+		}
+		j, seen := owner[ts.Nodes[0]]
+		if !seen {
+			owner[ts.Nodes[0]] = i
+			continue
+		}
+		msg := fmt.Sprintf("targets %s and %s report the same node %s", s.Targets[j].Target, ts.Target, ts.Nodes[0])
+		if s.Targets[j].Error == "" {
+			s.Targets[j].Error = truncate(msg)
+		}
+		s.Targets[i].Error = truncate(msg)
+	}
 	checkExpected(t, s)
 }
 
