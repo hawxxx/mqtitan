@@ -367,6 +367,9 @@ func (c *client5) Close()                     { _ = c.conn.Close(); <-c.c.Done()
 func (c *client5) Done() <-chan struct{}      { return c.c.Done() }
 func (c *client5) RemoteAddr() netip.AddrPort { return c.remote }
 func (c *client5) Disconnect() {
+	// paho writes DISCONNECT without a deadline; bound it so a broker that
+	// stopped reading cannot block the session (Close then unblocks).
+	_ = c.conn.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
 	_ = c.c.Disconnect(&paho.Disconnect{ReasonCode: 0})
 	c.Close()
 }

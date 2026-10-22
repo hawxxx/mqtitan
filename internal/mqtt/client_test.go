@@ -333,3 +333,35 @@ func TestDisconnectSendsMQTTDisconnect(t *testing.T) {
 		}
 	}
 }
+
+func TestDisconnectDoesNotBlockOnSilentBroker(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		_, _ = conn.Read(buf)
+		_, _ = conn.Write([]byte{0x20, 0x03, 0x00, 0x00, 0x00}) // MQTT 5 CONNACK, success
+		time.Sleep(5 * time.Second)                             // never read again
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c, err := Connect(ctx, scenario.Broker{URL: "mqtt://" + l.Addr().String(), Version: "5", CleanStart: true}, "silent", func([]byte) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { c.Disconnect(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Disconnect blocked on a broker that stopped reading")
+	}
+}

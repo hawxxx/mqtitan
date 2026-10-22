@@ -218,8 +218,8 @@ type Snapshot struct {
 	SubscribeErrors     uint64            `json:"subscribeErrors"`
 	CorrelationSamples  uint64            `json:"correlationSamples"`
 	Reconnects          uint64            `json:"reconnects"`
-	Churned             uint64            `json:"churned"`
-	ChurnReconnects     uint64            `json:"churnReconnects"`
+	Churned             uint64            `json:"churned,omitempty"`
+	ChurnReconnects     uint64            `json:"churnReconnects,omitempty"`
 	Disconnects         uint64            `json:"disconnects"`
 	PublishSlotsMissed  uint64            `json:"publishSlotsMissed"`
 	CorrelationRejected uint64            `json:"correlationRejected"`
