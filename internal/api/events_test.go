@@ -3,12 +3,14 @@ package api
 import (
 	"encoding/json"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mqtitan/mqtitan/internal/emqx"
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	"github.com/mqtitan/mqtitan/internal/storage"
 )
 
 func messages(events []LogEvent) string {
@@ -93,5 +95,50 @@ func TestTelemetryChangeLogsTransitionsOnce(t *testing.T) {
 	}
 	if level, msg := telemetryChange(&bad, ok); level != "info" || !strings.Contains(msg, "complete again (2 targets") {
 		t.Fatalf("recovered: %s %q", level, msg)
+	}
+}
+
+func TestRunLogIsPersistedWhileRunning(t *testing.T) {
+	// Restore after the manager is closed: cleanups run last-in first-out.
+	old := eventPersistEvery
+	t.Cleanup(func() { eventPersistEvery = old })
+	eventPersistEvery = 50 * time.Millisecond
+	m, _ := setup(t)
+	run, err := m.Start(strings.Replace(testScenario, "150ms", "5s", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "log written before the test ends", func() bool {
+		b, err := m.store.Get("events", run.ID)
+		return err == nil && strings.Contains(string(b), "started")
+	})
+	if v, _ := m.Get(run.ID); v.Status != "running" {
+		t.Fatalf("test ended before the log was persisted: %s", v.Status)
+	}
+	_ = m.Stop(run.ID)
+}
+
+func TestRestartNotesInterruptedRunInItsLog(t *testing.T) {
+	s, err := storage.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	rec, _ := json.Marshal(Test{ID: "abc", Name: "x", Status: "running", StartedAt: time.Now().UTC()})
+	prior, _ := json.Marshal([]LogEvent{{Seq: 1, Time: time.Now().UTC(), Level: "info", Message: "Test started"}})
+	if err = s.Put("tests", "abc", rec); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Put("events", "abc", prior); err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewManager(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.Close()
+	events, err := m.Events("abc")
+	if err != nil || len(events) != 2 || events[1].Seq != 2 || events[1].Level != "error" || !strings.Contains(events[1].Message, "Controller restarted") {
+		t.Fatalf("events: %+v err %v", events, err)
 	}
 }

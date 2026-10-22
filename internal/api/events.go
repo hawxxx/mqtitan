@@ -26,6 +26,42 @@ type LogEvent struct {
 
 const maxLogEvents = 1000
 
+// eventPersistEvery bounds how often a running test's log is written out, so
+// a controller crash loses at most a few seconds of it.
+var eventPersistEvery = 5 * time.Second
+
+// flushEvents persists the log if it changed since the last flush.
+func (m *Manager) flushEvents(r *execution, lastSeq *int, lastAt *time.Time) {
+	m.mu.Lock()
+	seq := r.seq
+	m.mu.Unlock()
+	if seq == *lastSeq || time.Since(*lastAt) < eventPersistEvery {
+		return
+	}
+	*lastSeq, *lastAt = seq, time.Now()
+	m.persistEvents(r)
+}
+
+// noteInterrupted appends the restart to the stored log of a run that was
+// still marked running when the controller started.
+func noteInterrupted(store *storage.Store, id string, at time.Time) {
+	var events []LogEvent
+	if b, err := store.Get("events", id); err == nil {
+		_ = json.Unmarshal(b, &events)
+	}
+	seq := 0
+	if len(events) > 0 {
+		seq = events[len(events)-1].Seq
+	}
+	if len(events) >= maxLogEvents {
+		events = events[1:]
+	}
+	events = append(events, LogEvent{Seq: seq + 1, Time: at, Level: "error", Message: "Controller restarted before the test completed; the run was interrupted"})
+	if b, err := json.Marshal(events); err == nil {
+		_ = store.Put("events", id, b)
+	}
+}
+
 // logEvent records and streams an event. The caller holds m.mu.
 func (m *Manager) logEvent(r *execution, level, format string, args ...any) {
 	r.seq++

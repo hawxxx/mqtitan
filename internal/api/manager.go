@@ -115,6 +115,7 @@ func NewManager(store *storage.Store) (*Manager, error) {
 				cancel()
 				return nil, err
 			}
+			noteInterrupted(store, t.ID, now)
 		}
 	}
 	m.workers = newWorkerRegistry()
@@ -246,6 +247,8 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 	last := r.snapshot()
 	lastTime := time.Now()
 	lastCompact := time.Now()
+	var lastEventSeq int
+	var lastEventAt time.Time
 	record := func() {
 		now := time.Now().UTC()
 		snap := r.snapshot()
@@ -281,6 +284,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 		select {
 		case <-ticker.C:
 			record()
+			m.flushEvents(r, &lastEventSeq, &lastEventAt)
 		case err := <-done:
 			record()
 			stopTelemetry()
