@@ -2642,13 +2642,6 @@ function Shell() {
             <span className="environment">
               <i /> LOCAL
             </span>
-            <button
-              aria-label="Create a new test"
-              className="topbar-new"
-              onClick={() => setWizard(true)}
-            >
-              <Plus size={15} /> <span className="label">New test</span>
-            </button>
           </div>
         </header>
         <main id="main-content" tabIndex={-1} key={path} className="page-enter">

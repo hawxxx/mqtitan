@@ -370,10 +370,6 @@ nav a.active:before {
   align-items: center;
   gap: 8px;
 }
-.topbar-new {
-  padding: 7px 11px;
-  font-size: 12px;
-}
 main {
   padding: 32px 36px 40px;
   max-width: 1700px;
@@ -1355,9 +1351,6 @@ textarea:focus {
   .welcome-footer {
     flex-wrap: wrap;
     gap: 15px;
-  }
-  .topbar-new .label {
-    display: none;
   }
   .two-col {
     gap: 16px;
