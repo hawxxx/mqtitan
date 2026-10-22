@@ -43,7 +43,7 @@ If the AWS load balancer terminates TLS, client TLS credentials authenticate to 
 
 ## Remote workers and mTLS material
 
-Certificate profiles are the way to give remote workers mTLS material: API submissions reject `caFile`, `certFile` and `keyFile` paths, and the controller sends resolved PEM data to workers. Files referenced by path work only for standalone CLI runs (`mqtitan run` without `--controller`), where `safety.strictSecrets` can check them. There is no profile delete API, so for short-lived lab credentials use a dedicated controller database and delete it together with its `.key` file afterwards.
+Certificate profiles are the way to give remote workers mTLS material: API submissions reject `caFile`, `certFile` and `keyFile` paths, and the controller sends resolved PEM data to workers. Files referenced by path work only for standalone CLI runs (`mqtitan run` without `--controller` and with `MQTITAN_CONTROLLER` unset, since that variable supplies the default `--controller`), where `safety.strictSecrets` can check them. A run that reaches the controller API rejects the file paths and applies `MQTITAN_TELEMETRY_ALLOWED_HOSTS` to telemetry. There is no profile delete API, so for short-lived lab credentials use a dedicated controller database and delete it together with its `.key` file afterwards.
 
 ## Storage lifecycle
 

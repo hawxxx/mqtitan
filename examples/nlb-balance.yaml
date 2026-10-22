@@ -1,7 +1,10 @@
 # Verifies that a network load balancer spreads new connections evenly across
 # brokers and zones. CLI-only: the TLS file paths below are rejected by the
-# API, so run it with `mqtitan run` (or use certificate profiles for remote
-# workers). Replace every example.com name, the resolvers and the CIDRs.
+# API, so run it with `mqtitan run` without --controller and with
+# MQTITAN_CONTROLLER unset; otherwise the run goes to the controller API, which
+# rejects file paths and enforces MQTITAN_TELEMETRY_ALLOWED_HOSTS (use
+# certificate profiles for remote workers). Replace every example.com name,
+# the resolvers and the CIDRs.
 apiVersion: mqtitan.io/v1alpha1
 kind: Scenario
 name: nlb-balance
