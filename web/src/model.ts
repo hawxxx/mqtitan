@@ -66,6 +66,7 @@ export interface Test {
   workerIds?: string[] | null;
   lostWorkers?: string[];
   sourceTestId?: string;
+  balance?: Balance;
   loadControl?: {
     capacityClients: number;
     maxRatePerClient: number;
@@ -96,7 +97,21 @@ export interface FleetSample {
   targets: TargetSample[];
   complete: boolean;
   baseline: boolean;
-  Error?: string;
+  error?: string;
+}
+export interface BalanceGroup {
+  key: string;
+  connections: number;
+}
+export interface Balance {
+  timestamp: string;
+  complete: boolean;
+  targets: BalanceGroup[];
+  zones: BalanceGroup[];
+  targetCV: number;
+  targetRatio: number | null;
+  zoneSkew: number;
+  zoneRatio: number | null;
 }
 export interface Sample {
   timestamp: string;
@@ -293,5 +308,7 @@ export function runWarnings(t: Test): string[] {
     out.push(
       `Lost workers: ${t.lostWorkers.join(", ")}. Their partitions stopped early; results include their last reported counters only.`,
     );
+  if (t.balance?.complete === false)
+    out.push("Broker telemetry was incomplete at the peak sample");
   return out;
 }

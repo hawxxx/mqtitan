@@ -2133,3 +2133,6 @@ textarea:focus {
   color: var(--muted);
   font-size: 11px;
 }
+.balance-tiles{display:flex;gap:1.5rem;flex-wrap:wrap;margin:.5rem 0}
+.balance-row{display:grid;grid-template-columns:minmax(6rem,12rem) 1fr 5rem;gap:.75rem;align-items:center}
+.balance-row progress{width:100%}

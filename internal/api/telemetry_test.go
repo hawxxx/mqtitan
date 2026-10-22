@@ -95,7 +95,7 @@ func TestTestTelemetryPolledAndStreamed(t *testing.T) {
 		t.Fatalf("persisted: %d %d samples", code, len(v))
 	}
 	raw, err := m.store.Get("tests", test.ID)
-	if err != nil || strings.Contains(string(raw), `"complete"`) || strings.Contains(string(raw), `"brokers"`) {
+	if err != nil || strings.Contains(string(raw), `"source"`) || strings.Contains(string(raw), `"brokers"`) {
 		t.Fatalf("samples stored on the test record (%v)", err)
 	}
 	r := httptest.NewRequest("GET", "/api/v1/tests/missing/brokers", nil)
@@ -203,4 +203,78 @@ func TestAPITelemetryHostAllowlist(t *testing.T) {
 	waitFor(t, "local request", func() bool { return hits.Load() > before })
 	_ = m2.Stop(local.ID)
 	waitFor(t, "local stop", func() bool { v, _ := m2.Get(local.ID); return v.Status != "running" })
+}
+
+func TestBalanceThresholdUsesPeakSample(t *testing.T) {
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v5/nodes" {
+			w.WriteHeader(500)
+			return
+		}
+		n := 0
+		if calls.Add(1) == 1 {
+			n = 300
+		}
+		_, _ = fmt.Fprintf(w, `[{"node":"n","live_connections":%d}]`, n)
+	}))
+	defer srv.Close()
+	m, _ := setup(t)
+	m.SetCredentials(emqx.Credentials{APIKey: "k", APISecret: "s"})
+	m.SetTelemetryAllowedHosts("127.0.0.1")
+	m.telemetryEvery = 50 * time.Millisecond
+	long := strings.Replace(telemetryScenario(srv.URL, "none", ""), "duration: 150ms", "duration: 1s", 1)
+	long = strings.Replace(long, "workloads:", "thresholds:\n  broker_connection_cv: \"<10%\"\nworkloads:", 1)
+	test, err := m.Start(long)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "two samples", func() bool { v, _ := m.Brokers(test.ID); return len(v) >= 2 })
+	if err = m.Stop(test.ID); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "stop", func() bool { v, _ := m.Get(test.ID); return v.Status != "running" })
+	got, _ := m.Get(test.ID)
+	if got.Balance == nil || len(got.Balance.Targets) != 1 || got.Balance.Targets[0].Connections != 300 {
+		t.Fatalf("%+v", got.Balance)
+	}
+	if len(got.Thresholds) != 1 || got.Thresholds[0].Observed != "no observations" {
+		t.Fatalf("%+v", got.Thresholds)
+	}
+}
+
+func TestPrometheusBalanceSeries(t *testing.T) {
+	m, h := setup(t)
+	old := Test{ID: "old", Name: "o", Status: "completed", StartedAt: time.Now().Add(-time.Hour)}
+	cur := Test{ID: "cur", Name: "c", Status: "completed", StartedAt: time.Now(), Balance: &emqx.Balance{Complete: false, TargetCV: 0.25, ZoneSkew: 0.5}}
+	for _, x := range []Test{old, cur} {
+		if err := m.persist(x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	samples := []emqx.FleetSample{
+		{Baseline: true, Targets: []emqx.TargetSample{{Target: "e0", Zone: "a", Connections: 999}}},
+		{Complete: true, Targets: []emqx.TargetSample{{Target: "e0", Zone: "a", Connections: 7}, {Target: "e1", Zone: "b", Connections: 9}}},
+		{Complete: false, Targets: []emqx.TargetSample{{Target: "e0", Zone: "a", Connections: 11}, {Target: "e1", Zone: "b", Connections: 13}, {Error: "no label"}}},
+	}
+	b, _ := json.Marshal(samples)
+	if err := m.store.Put("brokers", "cur", b); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	body := w.Body.String()
+	for _, want := range []string{
+		`emqxload_broker_connections{target="e0",zone="a"} 11`, `emqxload_broker_connections{target="e1",zone="b"} 13`,
+		`emqxload_broker_connection_cv 0.25`, `emqxload_zone_connection_skew_ratio 0.5`, `emqxload_broker_telemetry_complete 0`,
+	} {
+		if !strings.Contains(body, want+"\n") {
+			t.Fatalf("missing %s in\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "999") || strings.Contains(body, `target=""`) {
+		t.Fatal("baseline or errored target exported")
+	}
 }

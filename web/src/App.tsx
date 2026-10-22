@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { AddressDistribution } from "./AddressDistribution";
+import { BalancePanel, liveBalance } from "./BalancePanel";
 import { LatencyPanel } from "./LatencyPanel";
 import { CertificateSettings } from "./CertificateSettings";
 import { LiveLoadControls } from "./LiveLoadControls";
@@ -1289,6 +1290,11 @@ function TestDetail({ id }: { id: string }) {
     refetchInterval: t?.status === "running" ? 5000 : false,
   });
   const stream = useStream(id, t?.status === "running");
+  const brokers = useQuery({
+    queryKey: ["brokers", id],
+    queryFn: () => request<FleetSample[]>(`/tests/${id}/brokers`),
+    refetchInterval: t?.status === "running" ? 10000 : false,
+  });
   const [tab, setTab] = useState("Overview");
   const [exportError, setExportError] = useState<unknown>();
   const qc = useQueryClient();
@@ -1536,6 +1542,7 @@ function TestDetail({ id }: { id: string }) {
           </section>
           {tab === "Latency" && <LatencyPanel snapshot={s} />}
           <AddressDistribution snapshot={s} samples={metrics.data || []} />
+          <BalancePanel balance={t.balance || liveBalance(brokers.data)} />
           <div className="two-col">
             <section className="panel side-panel">
               <h2>Connection telemetry</h2>

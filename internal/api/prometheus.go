@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/emqx"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"io"
 	"net/http"
@@ -107,6 +108,7 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 			}
 		}
 		writeLabelSeries(w, latest.Snapshot)
+		m.writeBalanceSeries(w, latest)
 		fmt.Fprintln(w, "# TYPE emqxload_e2e_latency_seconds gauge")
 		for _, p := range []struct {
 			q string
@@ -149,4 +151,44 @@ func writeLabelSeries(w io.Writer, s metrics.Snapshot) {
 			fmt.Fprintf(w, "%s%s %s\n", sr.name, sr.line(r), sr.value(r))
 		}
 	}
+}
+
+// writeBalanceSeries exports the latest broker sample and the peak balance of
+// one test. Nothing is written for a test without telemetry.
+func (m *Manager) writeBalanceSeries(w io.Writer, t Test) {
+	samples, err := m.Brokers(t.ID)
+	if err != nil {
+		return
+	}
+	var latest *emqx.FleetSample
+	for i := len(samples) - 1; i >= 0; i-- {
+		if !samples[i].Baseline {
+			latest = &samples[i]
+			break
+		}
+	}
+	if latest == nil {
+		return
+	}
+	fmt.Fprintln(w, "# TYPE emqxload_broker_connections gauge")
+	for _, s := range latest.Targets[:min(len(latest.Targets), 1024)] {
+		if s.Error == "" {
+			fmt.Fprintf(w, "emqxload_broker_connections{target=%q,zone=%q} %g\n", s.Target, s.Zone, s.Connections)
+		}
+	}
+	complete := 0
+	if latest.Complete {
+		complete = 1
+	}
+	balance := t.Balance
+	if balance == nil { // still running: derive it from the live samples
+		if peak, ok := emqx.PeakBalance(samples); ok {
+			balance = &peak
+		}
+	}
+	if balance != nil {
+		fmt.Fprintf(w, "# TYPE emqxload_broker_connection_cv gauge\nemqxload_broker_connection_cv %g\n", balance.TargetCV)
+		fmt.Fprintf(w, "# TYPE emqxload_zone_connection_skew_ratio gauge\nemqxload_zone_connection_skew_ratio %g\n", balance.ZoneSkew)
+	}
+	fmt.Fprintf(w, "# TYPE emqxload_broker_telemetry_complete gauge\nemqxload_broker_telemetry_complete %d\n", complete)
 }

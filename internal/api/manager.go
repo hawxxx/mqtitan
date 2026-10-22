@@ -38,6 +38,7 @@ type Test struct {
 	WorkerIDs    []string            `json:"workerIds"`
 	LostWorkers  []string            `json:"lostWorkers,omitempty"`
 	SourceTestID string              `json:"sourceTestId,omitempty"`
+	Balance      *emqx.Balance       `json:"balance,omitempty"`
 }
 type Sample struct {
 	Timestamp   time.Time        `json:"timestamp"`
@@ -268,7 +269,13 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			record()
 			stopTelemetry()
 			now := time.Now().UTC()
-			results, thresholdErr := thresholds.Evaluate(s.Thresholds, r.snapshot())
+			var balance *emqx.Balance
+			m.mu.Lock()
+			if peak, ok := emqx.PeakBalance(r.brokers); ok {
+				balance = &peak
+			}
+			m.mu.Unlock()
+			results, thresholdErr := thresholds.Evaluate(s.Thresholds, r.snapshot(), balance)
 			m.mu.Lock()
 			r.test.EndedAt = &now
 			if len(r.workerIDs) > 0 {
@@ -277,6 +284,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 				m.workers.mu.Unlock()
 			}
 			r.test.Thresholds = results
+			r.test.Balance = balance
 			r.test.Status = "completed"
 			if ctx.Err() != nil {
 				r.test.Status = "stopped"
