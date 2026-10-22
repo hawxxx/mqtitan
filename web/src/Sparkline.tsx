@@ -17,10 +17,16 @@ export function downsample(values: number[], points = POINTS): number[] {
   return out;
 }
 
-export function sparkPaths(values: number[], width = 100, height = 32) {
+export function sparkPaths(
+  values: number[],
+  width = 100,
+  height = 32,
+  zero = false,
+) {
   const v = downsample(values);
   if (v.length < 2) return undefined;
-  const lo = Math.min(...v);
+  // Counts and rates start at zero, so ordinary jitter stays a ripple.
+  const lo = zero ? Math.min(0, ...v) : Math.min(...v);
   const hi = Math.max(...v);
   const span = hi - lo || 1;
   const pad = 2;
@@ -34,9 +40,15 @@ export function sparkPaths(values: number[], width = 100, height = 32) {
   return { line, area: `${line} L${width} ${height} L0 ${height} Z` };
 }
 
-export function Sparkline({ values }: { values: number[] }) {
+export function Sparkline({
+  values,
+  zero = false,
+}: {
+  values: number[];
+  zero?: boolean;
+}) {
   const id = useId();
-  const paths = sparkPaths(values);
+  const paths = sparkPaths(values, 100, 32, zero);
   if (!paths) return null;
   return (
     <svg

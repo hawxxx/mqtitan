@@ -12,6 +12,7 @@ import { NumberTicker } from "./components/magicui/NumberTicker";
 import { RunAgainButton } from "./RunAgainButton";
 import { RunConsole } from "./RunConsole";
 import { readScenarioFiles } from "./scenarioImport";
+import { Pager } from "./Pager";
 import { Sparkline } from "./Sparkline";
 import { TimeZonePicker } from "./TimeZonePicker";
 import { WorkerCard } from "./WorkerCard";
@@ -205,19 +206,21 @@ function Metric({
   sub,
   accent = false,
   spark,
+  sparkZero,
 }: {
   label: string;
   value: ReactNode;
   sub?: string;
   accent?: boolean;
   spark?: number[];
+  sparkZero?: boolean;
 }) {
   return (
     <div className={`metric ${accent ? "accent" : ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{sub}</small>
-      {spark && <Sparkline values={spark} />}
+      {spark && <Sparkline values={spark} zero={sparkZero} />}
     </div>
   );
 }
@@ -598,6 +601,7 @@ export function Dashboard({
           }
           sub="Across active tests"
           spark={series.map((x) => x.snapshot.connected)}
+          sparkZero
         />
         <Metric
           label="MESSAGES PUBLISHED"
@@ -613,6 +617,7 @@ export function Dashboard({
               : "All recorded runs"
           }
           spark={series.map((x) => x.messageRate)}
+          sparkZero
         />
         <Metric
           label="LATEST P95 LATENCY"
@@ -1006,6 +1011,7 @@ export function ScenarioEditor({
   const [name, setName] = useState("MQTT baseline");
   const [message, setMessage] = useState("");
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
+  const [workerQuery, setWorkerQuery] = useState("");
   const qc = useQueryClient();
   const workers = useQuery({
     queryKey: ["workers"],
@@ -1189,35 +1195,13 @@ export function ScenarioEditor({
             {workers.error ? (
               <ErrorNotice error={workers.error} />
             ) : (
-              workers.data
-                ?.filter((w) => w.id !== "local")
-                .map((w) => (
-                  <label className="worker-choice" key={w.id}>
-                    <input
-                      type="checkbox"
-                      aria-label={w.id}
-                      checked={selectedWorkers.includes(w.id)}
-                      disabled={
-                        !["ready", "online", "idle", "active"].includes(
-                          w.status,
-                        )
-                      }
-                      onChange={(e) =>
-                        setSelectedWorkers((old) =>
-                          e.target.checked
-                            ? [...old, w.id]
-                            : old.filter((x) => x !== w.id),
-                        )
-                      }
-                    />
-                    <span>
-                      {w.id}
-                      <small>
-                        {w.status} · {w.cpuCount} cores
-                      </small>
-                    </span>
-                  </label>
-                ))
+              <WorkerPicker
+                workers={(workers.data || []).filter((w) => w.id !== "local")}
+                selected={selectedWorkers}
+                onChange={setSelectedWorkers}
+                query={workerQuery}
+                onQuery={setWorkerQuery}
+              />
             )}
             <small className="subdued">
               {selectedWorkers.length
@@ -1549,24 +1533,19 @@ function TestDetail({ id }: { id: string }) {
         </div>
       ))}
       <div className="tabs" role="tablist" aria-label="Test views">
-        {[
-          "Overview",
-          "Latency",
-          "Connections",
-          "Thresholds",
-          "Run log",
-          "Scenario",
-        ].map((x) => (
-          <button
-            className={tab === x ? "active" : ""}
-            key={x}
-            role="tab"
-            aria-selected={tab === x}
-            onClick={() => setTab(x)}
-          >
-            {x}
-          </button>
-        ))}
+        {["Overview", "Latency", "Connections", "Thresholds", "Scenario"].map(
+          (x) => (
+            <button
+              className={tab === x ? "active" : ""}
+              key={x}
+              role="tab"
+              aria-selected={tab === x}
+              onClick={() => setTab(x)}
+            >
+              {x}
+            </button>
+          ),
+        )}
         <span
           className={`stream ${stream}`}
           role="status"
@@ -1600,6 +1579,7 @@ function TestDetail({ id }: { id: string }) {
             }
             sub={`${number(s.peakConnected)} peak connected`}
             spark={series.map((x) => x.snapshot.connected)}
+            sparkZero
             accent
           />
         ) : (
@@ -1615,6 +1595,7 @@ function TestDetail({ id }: { id: string }) {
           value={<NumberTicker value={s.published} format={number} />}
           sub={`${number(s.received)} received`}
           spark={series.map((x) => x.messageRate)}
+          sparkZero
         />
         <Metric
           label="P95 LATENCY"
@@ -1676,14 +1657,6 @@ function TestDetail({ id }: { id: string }) {
             />
           )}
         </section>
-      ) : tab === "Run log" ? (
-        <RunConsole
-          startedAt={t.startedAt}
-          samples={metrics.data || []}
-          events={events.data || []}
-          running={t.status === "running"}
-          tall
-        />
       ) : tab === "Latency" ? (
         <>
           <ChartPanel metrics={metrics} field="p95" />
@@ -2033,7 +2006,97 @@ export function Brokers() {
     </>
   );
 }
-function Workers() {
+const READY = ["ready", "online", "idle", "active"];
+export function WorkerPicker({
+  workers,
+  selected,
+  onChange,
+  query,
+  onQuery,
+}: {
+  workers: Worker[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  query: string;
+  onQuery: (q: string) => void;
+}) {
+  const many = workers.length > 6;
+  const shown = workers.filter((w) =>
+    workerSearchText(w).includes(query.trim().toLowerCase()),
+  );
+  const ready = shown.filter((w) => READY.includes(w.status));
+  return (
+    <>
+      {many && (
+        <div className="worker-picker-tools">
+          <input
+            type="search"
+            aria-label="Search workers"
+            placeholder="Search workers"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+          />
+          <button
+            disabled={!ready.length}
+            onClick={() =>
+              onChange([...new Set([...selected, ...ready.map((w) => w.id)])])
+            }
+          >
+            Select {query ? "matching" : "all"} ready
+          </button>
+          <button disabled={!selected.length} onClick={() => onChange([])}>
+            Clear
+          </button>
+        </div>
+      )}
+      <div className={many ? "worker-picker-list" : undefined}>
+        {shown.map((w) => (
+          <label className="worker-choice" key={w.id}>
+            <input
+              type="checkbox"
+              aria-label={w.id}
+              checked={selected.includes(w.id)}
+              disabled={!READY.includes(w.status)}
+              onChange={(e) =>
+                onChange(
+                  e.target.checked
+                    ? [...selected, w.id]
+                    : selected.filter((x) => x !== w.id),
+                )
+              }
+            />
+            <span>
+              {w.id}
+              <small>
+                {w.status} · {w.host?.cpus || w.cpuCount} cores
+                {w.host?.os ? ` · ${w.host.os}/${w.host.arch}` : ""}
+              </small>
+            </span>
+          </label>
+        ))}
+        {many && !shown.length && (
+          <small className="subdued">No workers match.</small>
+        )}
+      </div>
+    </>
+  );
+}
+const WORKER_PAGE = 12;
+const workerSearchText = (w: Worker) =>
+  [
+    w.id,
+    w.status,
+    w.host?.hostname,
+    w.host?.os,
+    w.host?.arch,
+    w.host?.distro,
+    w.host?.cpuModel,
+    w.host?.container,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+export function Workers() {
   const workers = useQuery({
     queryKey: ["workers"],
     queryFn: () => request<Worker[]>("/workers"),
@@ -2043,6 +2106,28 @@ function Workers() {
     queryKey: ["doctor"],
     queryFn: () => request<Check[]>("/doctor"),
   });
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(0);
+  const all = workers.data || [];
+  const filtered = all.filter(
+    (w) =>
+      (status === "all" || w.status === status) &&
+      workerSearchText(w).includes(query.trim().toLowerCase()),
+  );
+  const start =
+    Math.min(page, Math.max(0, Math.ceil(filtered.length / WORKER_PAGE) - 1)) *
+    WORKER_PAGE;
+  const shown = filtered.slice(start, start + WORKER_PAGE);
+  const totals = all.reduce(
+    (t, w) => ({
+      ...t,
+      [w.status]: (t[w.status] || 0) + 1,
+      cores: t.cores + (w.host?.cpus || w.cpuCount),
+      clients: t.clients + w.connected,
+    }),
+    { cores: 0, clients: 0 } as Record<string, number>,
+  );
   return (
     <>
       <Title
@@ -2060,8 +2145,59 @@ function Workers() {
         </button>
       </Title>
       {workers.error && <ErrorNotice error={workers.error} />}
+      {all.length > 0 && (
+        <div className="worker-summary" aria-label="Fleet summary">
+          <div>
+            <span>Workers</span>
+            <strong>{number(all.length)}</strong>
+          </div>
+          {["ready", "running", "lost"]
+            .filter((k) => totals[k])
+            .map((k) => (
+              <div key={k} className={`worker-state ${k}`}>
+                <span>{k}</span>
+                <strong>{number(totals[k])}</strong>
+              </div>
+            ))}
+          <div>
+            <span>Total cores</span>
+            <strong>{number(totals.cores)}</strong>
+          </div>
+          <div>
+            <span>Connected clients</span>
+            <strong>{number(totals.clients)}</strong>
+          </div>
+        </div>
+      )}
+      {all.length > WORKER_PAGE && (
+        <div className="worker-tools">
+          <input
+            type="search"
+            aria-label="Search workers"
+            placeholder="Search by ID, host, OS or CPU"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(0);
+            }}
+          />
+          <select
+            aria-label="Filter workers by status"
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="all">All statuses</option>
+            <option value="ready">Ready</option>
+            <option value="running">Running</option>
+            <option value="lost">Lost</option>
+          </select>
+        </div>
+      )}
       <div className="worker-grid">
-        {workers.data?.map((w) => (
+        {shown.map((w) => (
           <WorkerCard
             key={w.id}
             worker={w}
@@ -2069,6 +2205,18 @@ function Workers() {
           />
         ))}
       </div>
+      {filtered.length > WORKER_PAGE && (
+        <Pager
+          label="Workers"
+          total={filtered.length}
+          page={page}
+          pageSize={WORKER_PAGE}
+          onPage={setPage}
+        />
+      )}
+      {all.length > 0 && filtered.length === 0 && (
+        <p className="subdued worker-none">No workers match this filter.</p>
+      )}
       {!workers.isLoading && !workers.data?.length && !workers.error && (
         <section className="panel">
           <Empty

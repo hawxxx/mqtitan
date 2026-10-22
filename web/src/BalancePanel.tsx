@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Balance, BalanceGroup, FleetSample } from "./model";
 import { number } from "./model";
+import { Pager } from "./Pager";
 
 const PAGE_SIZE = 20;
 type Order = "most" | "least" | "name";
@@ -64,25 +65,13 @@ function Bars({ title, groups }: { title: string; groups: BalanceGroup[] }) {
         </div>
       ))}
       {many && (
-        <nav className="balance-pager" aria-label={`${title} pages`}>
-          <span>
-            {filtered.length
-              ? `${number(current * PAGE_SIZE + 1)}–${number(current * PAGE_SIZE + shown.length)} of ${number(filtered.length)}`
-              : "No matches"}
-          </span>
-          <button disabled={current === 0} onClick={() => setPage(current - 1)}>
-            Previous
-          </button>
-          <span className="mono">
-            {current + 1} / {pages}
-          </span>
-          <button
-            disabled={current >= pages - 1}
-            onClick={() => setPage(current + 1)}
-          >
-            Next
-          </button>
-        </nav>
+        <Pager
+          label={title}
+          total={filtered.length}
+          page={current}
+          pageSize={PAGE_SIZE}
+          onPage={setPage}
+        />
       )}
     </div>
   );

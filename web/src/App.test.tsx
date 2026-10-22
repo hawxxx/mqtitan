@@ -4,6 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Dashboard,
   Wizard,
+  Workers,
+  WorkerPicker,
   Brokers,
   ScenarioEditor,
   BrokerTelemetry,
@@ -267,4 +269,91 @@ it("names the top connect failure stage", () => {
   expect(topConnectFailure({ tcp: 1, tls_alert: 4 })).toBe("tls_alert 4");
   expect(topConnectFailure({ tcp: 0 })).toBe("");
   expect(topConnectFailure(undefined)).toBe("");
+});
+
+const fleet = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    id: `worker-${String(i).padStart(2, "0")}`,
+    status: i % 10 === 0 ? "lost" : "ready",
+    cpuCount: 8,
+    memoryBytes: 1 << 20,
+    connected: 100,
+    lastSeen: "2026-01-01T00:00:00Z",
+    clockOffsetMs: 0,
+    host: {
+      os: i < 20 ? "linux" : "darwin",
+      arch: "arm64",
+      cpus: 8,
+      goVersion: "go1",
+      startedAt: "2026-01-01T00:00:00Z",
+    },
+  }));
+it("pages, searches and filters a large worker fleet", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify({
+            data: String(input).includes("/workers") ? fleet(30) : [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <Workers />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("1–12 of 30")).toBeTruthy();
+  expect(
+    screen.getAllByRole("heading", { level: 2, name: /^worker-/ }),
+  ).toHaveLength(12);
+  const summary = screen.getByLabelText("Fleet summary");
+  expect(summary.textContent).toContain("30");
+  expect(summary.textContent).toContain("240");
+  await userEvent.click(screen.getByRole("button", { name: "Next" }));
+  await userEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("25–30 of 30")).toBeTruthy();
+  await userEvent.selectOptions(
+    screen.getByLabelText("Filter workers by status"),
+    "lost",
+  );
+  expect(
+    screen.getAllByRole("heading", { level: 2, name: /^worker-/ }),
+  ).toHaveLength(3);
+  await userEvent.type(screen.getByLabelText("Search workers"), "zzz");
+  expect(screen.getByText("No workers match this filter.")).toBeTruthy();
+});
+it("selects ready workers in bulk from the scenario worker picker", async () => {
+  const workers = fleet(10);
+  let selected: string[] = [];
+  const { rerender } = render(
+    <WorkerPicker
+      workers={workers}
+      selected={selected}
+      onChange={(ids) => (selected = ids)}
+      query=""
+      onQuery={() => {}}
+    />,
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Select all ready" }),
+  );
+  expect(selected).toHaveLength(9);
+  expect(selected).not.toContain("worker-00");
+  rerender(
+    <WorkerPicker
+      workers={workers}
+      selected={selected}
+      onChange={() => {}}
+      query="darwin"
+      onQuery={() => {}}
+    />,
+  );
+  expect(screen.queryByLabelText("worker-05")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Select matching ready" }),
+  ).toBeTruthy();
 });

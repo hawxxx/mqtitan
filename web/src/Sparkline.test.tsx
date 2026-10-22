@@ -22,6 +22,13 @@ it("scales the path to the box and skips flat-free edge cases", () => {
   expect(sparkPaths([3, 3, 3])!.line).toContain("30.00");
 });
 
+it("anchors counts and rates to zero when asked", () => {
+  const free = sparkPaths([99, 100], 100, 32, false)!;
+  const anchored = sparkPaths([99, 100], 100, 32, true)!;
+  expect(free.line).toBe("M0.00 30.00 L100.00 2.00");
+  expect(anchored.line).toBe("M0.00 2.28 L100.00 2.00");
+});
+
 it("renders decoratively and only with enough points", () => {
   const { container, rerender } = render(<Sparkline values={[1]} />);
   expect(container.querySelector("svg")).toBeNull();

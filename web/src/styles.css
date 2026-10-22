@@ -3379,3 +3379,78 @@ input[hidden] {
     transform: translateY(-4px) scale(0.98);
   }
 }
+/* Fleet summary, search and paging for many workers. */
+.worker-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.worker-summary > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 16px;
+  min-width: 110px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass);
+  box-shadow: var(--glass-edge);
+}
+.worker-summary span {
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.worker-summary strong {
+  font: 500 20px "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.worker-state.ready strong,
+.worker-state.running strong {
+  color: var(--check-pass);
+}
+.worker-state.lost strong {
+  color: var(--check-fail);
+}
+.worker-tools,
+.worker-picker-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.worker-tools input,
+.worker-picker-tools input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.worker-tools select {
+  width: auto;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.worker-picker-tools {
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+}
+.worker-picker-tools button {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+.worker-picker-list {
+  max-height: 300px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.worker-none {
+  padding: 18px 0;
+  text-align: center;
+}
+.balance-pager {
+  margin-top: 6px;
+}
