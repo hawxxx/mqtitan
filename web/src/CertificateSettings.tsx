@@ -281,12 +281,11 @@ export function CertificateSettings({
             use HTTPS for their controller connection.
           </p>
           <div className="tls-upload-actions">
-            <button type="button" onClick={upload}>
+            <button type="button" className="primary" onClick={upload}>
               {busy ? "Validating & saving…" : "Save certificate profile"}
             </button>
             <button
               type="button"
-              className="text-button"
               onClick={() => {
                 setFiles({});
                 setFileGeneration((previous) => previous + 1);

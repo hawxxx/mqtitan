@@ -1628,7 +1628,8 @@ textarea:focus {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: 10px;
+  margin-top: 14px;
 }
 .tls-profile-details {
   display: flex;
