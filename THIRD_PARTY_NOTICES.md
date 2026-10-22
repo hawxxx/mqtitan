@@ -7,6 +7,7 @@
 The following are adapted from Magic UI registry components under the same license, also selected through the Magic UI MCP registry:
 
 - `web/src/components/magicui/BorderBeam.tsx` from https://magicui.design/r/border-beam.json, with the motion/react animation replaced by a CSS keyframe.
+- `web/src/components/magicui/NumberTicker.tsx` from https://magicui.design/r/number-ticker.json, with the motion/react spring replaced by a requestAnimationFrame ease.
 - The `blur-fade` page entrance in `web/src/styles.css`, from https://magicui.design/r/blur-fade.json, rewritten as a CSS keyframe.
 
 MIT License

@@ -8,7 +8,14 @@ import { CertificateSettings } from "./CertificateSettings";
 import { LiveLoadControls } from "./LiveLoadControls";
 import { BorderBeam } from "./components/magicui/BorderBeam";
 import { GridPattern } from "./components/magicui/GridPattern";
+import { NumberTicker } from "./components/magicui/NumberTicker";
 import { RunAgainButton } from "./RunAgainButton";
+import { RunConsole } from "./RunConsole";
+import { readScenarioFiles } from "./scenarioImport";
+import { Sparkline } from "./Sparkline";
+import { TimeZonePicker } from "./TimeZonePicker";
+import { WorkerCard } from "./WorkerCard";
+import { dateTime, useTimeZone } from "./timezone";
 import { YamlEditor, YamlView } from "./YamlCode";
 import {
   createRootRoute,
@@ -56,6 +63,7 @@ import {
   TriangleAlert,
   X,
   Zap,
+  Upload,
 } from "lucide-react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -71,6 +79,7 @@ import {
   request,
   type Check,
   type FleetSample,
+  type LogEvent,
   type Sample,
   type SavedScenario,
   type Test,
@@ -195,17 +204,20 @@ function Metric({
   value,
   sub,
   accent = false,
+  spark,
 }: {
   label: string;
   value: ReactNode;
   sub?: string;
   accent?: boolean;
+  spark?: number[];
 }) {
   return (
     <div className={`metric ${accent ? "accent" : ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{sub}</small>
+      {spark && <Sparkline values={spark} />}
     </div>
   );
 }
@@ -545,6 +557,8 @@ export function Dashboard({
     enabled: !!latest,
     refetchInterval: latest?.status === "running" ? 3000 : false,
   });
+  // Sparklines show the latest run's last five minutes.
+  const series = (samples.data || []).slice(-300);
   return (
     <>
       <div className="dashboard-intro">
@@ -570,24 +584,47 @@ export function Dashboard({
       <div className="metrics">
         <Metric
           label="ACTIVE TESTS"
-          value={running.length}
+          value={<NumberTicker value={running.length} format={number} />}
           sub={`${tests.length} total recorded runs`}
           accent
         />
         <Metric
           label="CONNECTED CLIENTS"
-          value={number(running.reduce((n, t) => n + t.snapshot.connected, 0))}
+          value={
+            <NumberTicker
+              value={running.reduce((n, t) => n + t.snapshot.connected, 0)}
+              format={number}
+            />
+          }
           sub="Across active tests"
+          spark={series.map((x) => x.snapshot.connected)}
         />
         <Metric
           label="MESSAGES PUBLISHED"
-          value={number(tests.reduce((n, t) => n + t.snapshot.published, 0))}
-          sub="All recorded runs"
+          value={
+            <NumberTicker
+              value={tests.reduce((n, t) => n + t.snapshot.published, 0)}
+              format={number}
+            />
+          }
+          sub={
+            latest?.status === "running" && series.length
+              ? `${number(Math.round(series[series.length - 1].messageRate))} msg/s now`
+              : "All recorded runs"
+          }
+          spark={series.map((x) => x.messageRate)}
         />
         <Metric
           label="LATEST P95 LATENCY"
-          value={latest ? latency(latest.snapshot.p95) : "—"}
+          value={
+            latest ? (
+              <NumberTicker value={latest.snapshot.p95} format={latency} />
+            ) : (
+              "—"
+            )
+          }
           sub={latest ? latest.name : "Waiting for first result"}
+          spark={series.map((x) => x.snapshot.p95)}
         />
       </div>
       {!tests.length ? (
@@ -654,12 +691,23 @@ export function Dashboard({
   );
 }
 export function Wizard({
-  done,
-  close,
+  done: finish,
+  close: dismiss,
 }: {
   done: (yaml: string) => void;
   close: () => void;
 }) {
+  // Play the exit animation before unmounting; reduced motion skips the wait.
+  const [leaving, setLeaving] = useState(false);
+  const leave = (after: () => void) => {
+    if (leaving) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches)
+      return after();
+    setLeaving(true);
+    setTimeout(after, 240);
+  };
+  const close = () => leave(dismiss);
+  const done = (yaml: string) => leave(() => finish(yaml));
   const [v, setV] = useState<WizardValues>({
     name: "MQTT baseline",
     broker: "mqtt://localhost:1883",
@@ -731,7 +779,7 @@ export function Wizard({
   }
   return createPortal(
     <div
-      className="modal-backdrop"
+      className={`modal-backdrop${leaving ? " leaving" : ""}`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close();
       }}
@@ -992,6 +1040,40 @@ export function ScenarioEditor({
       setMessage("Scenario saved.");
     },
   });
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const importFiles = useMutation({
+    mutationFn: async (files: File[]) => {
+      const { scenarios, errors } = await readScenarioFiles(files);
+      if (scenarios.length === 1 && !errors.length) {
+        setYaml(scenarios[0].yaml);
+        setName(scenarios[0].name);
+        return `Loaded ${scenarios[0].file} into the editor.`;
+      }
+      let saved = 0;
+      for (const sc of scenarios) {
+        try {
+          await request<SavedScenario>("/scenarios", {
+            method: "POST",
+            body: JSON.stringify({ name: sc.name, yaml: sc.yaml }),
+          });
+          saved++;
+        } catch (e) {
+          errors.push(`${sc.file}: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+      qc.invalidateQueries({ queryKey: ["scenarios"] });
+      if (errors.length)
+        throw new Error(
+          `Imported ${saved} of ${files.length}. ${errors.join("; ")}`,
+        );
+      return `Imported ${saved} scenarios into your library.`;
+    },
+    onSuccess: setMessage,
+  });
+  const onFiles = (list: FileList | null) => {
+    if (list?.length) importFiles.mutate([...list]);
+  };
   const plan = useMutation({
     mutationFn: () =>
       request<Record<string, unknown>>("/plan", {
@@ -1009,8 +1091,17 @@ export function ScenarioEditor({
         title="Scenario lab"
         detail="YAML workload definitions with explicit stages."
       >
-        <button disabled={plan.isPending} onClick={() => plan.mutate()}>
-          <Gauge size={16} /> Validate & plan
+        <button
+          className="validate-button"
+          disabled={plan.isPending}
+          onClick={() => plan.mutate()}
+        >
+          {plan.isPending ? (
+            <RefreshCw size={16} className="spin" />
+          ) : (
+            <Gauge size={16} />
+          )}
+          {plan.isPending ? "Validating…" : "Validate & plan"}
         </button>
         <button
           className="primary"
@@ -1021,17 +1112,64 @@ export function ScenarioEditor({
           {start.isPending ? "Starting…" : "Start test"}
         </button>
       </Title>
-      {(start.error || save.error || plan.error) && (
-        <ErrorNotice error={start.error || save.error || plan.error} />
+      {(start.error || save.error || plan.error || importFiles.error) && (
+        <ErrorNotice
+          error={start.error || save.error || plan.error || importFiles.error}
+        />
       )}
       <div className="editor-layout">
-        <section className="panel editor">
+        <section
+          className={`panel editor${dragging ? " dragging" : ""}`}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node))
+              setDragging(false);
+          }}
+          onDrop={(e) => {
+            if (!e.dataTransfer.files.length) return;
+            e.preventDefault();
+            setDragging(false);
+            onFiles(e.dataTransfer.files);
+          }}
+        >
           <div className="panel-heading">
             <h2>
               <FileCode2 size={17} /> scenario.yaml
             </h2>
-            <span className="subdued mono">YAML / v1alpha1</span>
+            <div className="editor-heading-actions">
+              <span className="subdued mono">YAML / v1alpha1</span>
+              <button
+                className="import-button"
+                disabled={importFiles.isPending}
+                onClick={() => fileInput.current?.click()}
+                title="Load one file into the editor, or save several to your library"
+              >
+                <Upload size={14} /> Import
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".yaml,.yml,application/yaml,text/yaml"
+                multiple
+                hidden
+                aria-label="Import scenario files"
+                onChange={(e) => {
+                  onFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
           </div>
+          {dragging && (
+            <div className="drop-hint" aria-hidden="true">
+              <Upload size={22} />
+              Drop YAML files to import
+            </div>
+          )}
           <YamlEditor label="Scenario YAML" value={yaml} onChange={setYaml} />
           <div className="panel-footer">
             <span>Broker credentials in YAML are sent to the server.</span>
@@ -1039,6 +1177,7 @@ export function ScenarioEditor({
           </div>
         </section>
         <aside>
+          {plan.data && <PlanResult key={plan.submittedAt} plan={plan.data} />}
           <section className="panel side-panel">
             <h2>
               <Server size={17} /> Execution workers
@@ -1134,44 +1273,65 @@ export function ScenarioEditor({
               <p>No saved scenarios yet.</p>
             )}
           </section>
-          {plan.data && (
-            <section className="panel side-panel">
-              <h2>
-                <CheckCircle2 size={17} /> Validated execution plan
-              </h2>
-              {Object.entries(plan.data)
-                .filter(([k]) => k !== "checks" && k !== "Warnings")
-                .map(([k, v]) => (
-                  <div className="plan-row" key={k}>
-                    <span>{planLabel(k)}</span>
-                    <strong className="mono">{planValue(k, v)}</strong>
-                  </div>
-                ))}
-              {Array.isArray(plan.data.Warnings) &&
-                plan.data.Warnings.map((w: string) => (
-                  <div className="capacity-check warn" key={w}>
-                    <strong>WARN · workload</strong>
-                    <p>{w}</p>
-                  </div>
-                ))}
-              {Array.isArray(plan.data.checks) &&
-                plan.data.checks.map((c: Check) => (
-                  <div
-                    className={`capacity-check ${c.Status.toLowerCase()}`}
-                    key={c.Name}
-                  >
-                    <strong>
-                      {c.Status} · {c.Name}
-                    </strong>
-                    <p>{c.Value}</p>
-                    {c.Recommendation && <small>{c.Recommendation}</small>}
-                  </div>
-                ))}
-            </section>
-          )}
         </aside>
       </div>
     </>
+  );
+}
+function PlanResult({ plan }: { plan: Record<string, unknown> }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, []);
+  const checks = Array.isArray(plan.checks) ? (plan.checks as Check[]) : [];
+  const warnings = Array.isArray(plan.Warnings)
+    ? (plan.Warnings as string[])
+    : [];
+  const statuses = checks.map((c) => c.Status.toLowerCase());
+  const overall = statuses.includes("fail")
+    ? "fail"
+    : statuses.includes("warn") || warnings.length
+      ? "warn"
+      : "pass";
+  const Icon = overall === "pass" ? CheckCircle2 : TriangleAlert;
+  return (
+    <section ref={ref} className={`panel side-panel plan-result ${overall}`}>
+      <h2>
+        <Icon size={17} /> Validated execution plan
+        <span className={`check-pill ${overall}`}>{overall}</span>
+      </h2>
+      {Object.entries(plan)
+        .filter(([k]) => k !== "checks" && k !== "Warnings")
+        .map(([k, v]) => (
+          <div className="plan-row" key={k}>
+            <span>{planLabel(k)}</span>
+            <strong className="mono">{planValue(k, v)}</strong>
+          </div>
+        ))}
+      {warnings.map((w) => (
+        <div className="capacity-check warn" key={w}>
+          <strong>
+            <span className="check-pill warn">warn</span> Workload
+          </strong>
+          <p>{w}</p>
+        </div>
+      ))}
+      {checks.map((c) => (
+        <div
+          className={`capacity-check ${c.Status.toLowerCase()}`}
+          key={c.Name}
+        >
+          <strong>
+            <span className={`check-pill ${c.Status.toLowerCase()}`}>
+              {c.Status.toLowerCase()}
+            </span>{" "}
+            {c.Name}
+          </strong>
+          <p>{c.Value}</p>
+          {c.Recommendation && <small>{c.Recommendation}</small>}
+        </div>
+      ))}
+    </section>
   );
 }
 // The plan endpoint returns Go field names and raw units (nanoseconds, bytes).
@@ -1245,8 +1405,14 @@ function useStream(id: string, running: boolean) {
                 qc.setQueryData<FleetSample[]>(["brokers", id], (old) =>
                   [...(old || []), v].slice(-2880),
                 );
+              if (event === "log")
+                qc.setQueryData<LogEvent[]>(["events", id], (old) =>
+                  old?.some((e) => e.seq === v.seq) ? old : [...(old || []), v],
+                );
               if (event === "status") {
                 qc.setQueryData(["test", id], v);
+                if (v.status !== "running")
+                  qc.invalidateQueries({ queryKey: ["events", id] });
                 qc.invalidateQueries({ queryKey: ["tests"] });
               }
             } catch {
@@ -1292,6 +1458,12 @@ function TestDetail({ id }: { id: string }) {
     queryFn: () => request<FleetSample[]>(`/tests/${id}/brokers`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
+  const events = useQuery({
+    queryKey: ["events", id],
+    queryFn: () => request<LogEvent[]>(`/tests/${id}/events`),
+    refetchInterval: t?.status === "running" ? 10000 : false,
+  });
+  const zone = useTimeZone();
   const [tab, setTab] = useState("Overview");
   const [exportError, setExportError] = useState<unknown>();
   const qc = useQueryClient();
@@ -1311,12 +1483,13 @@ function TestDetail({ id }: { id: string }) {
       </div>
     );
   const s = t.snapshot;
+  const series = (metrics.data || []).slice(-300);
   return (
     <>
       <Title
         eyebrow={`TESTS / ${id.slice(0, 12)}`}
         title={t.name}
-        detail={`Started ${new Date(t.startedAt).toLocaleString()}${t.endedAt ? ` · Ended ${new Date(t.endedAt).toLocaleString()} · Ran ${elapsed((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 1000)}` : ""}`}
+        detail={`Started ${dateTime(Date.parse(t.startedAt), zone)}${t.endedAt ? ` · Ended ${dateTime(Date.parse(t.endedAt), zone)} · Ran ${elapsed((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 1000)}` : ""}`}
       >
         <Badge status={t.status} />
         <RunAgainButton
@@ -1376,19 +1549,24 @@ function TestDetail({ id }: { id: string }) {
         </div>
       ))}
       <div className="tabs" role="tablist" aria-label="Test views">
-        {["Overview", "Latency", "Connections", "Thresholds", "Scenario"].map(
-          (x) => (
-            <button
-              className={tab === x ? "active" : ""}
-              key={x}
-              role="tab"
-              aria-selected={tab === x}
-              onClick={() => setTab(x)}
-            >
-              {x}
-            </button>
-          ),
-        )}
+        {[
+          "Overview",
+          "Latency",
+          "Connections",
+          "Thresholds",
+          "Run log",
+          "Scenario",
+        ].map((x) => (
+          <button
+            className={tab === x ? "active" : ""}
+            key={x}
+            role="tab"
+            aria-selected={tab === x}
+            onClick={() => setTab(x)}
+          >
+            {x}
+          </button>
+        ))}
         <span
           className={`stream ${stream}`}
           role="status"
@@ -1416,11 +1594,12 @@ function TestDetail({ id }: { id: string }) {
             label="CONNECTED / TARGET"
             value={
               <>
-                {number(s.connected)}
+                <NumberTicker value={s.connected} format={number} />
                 <em> / {number(s.targetClients)}</em>
               </>
             }
             sub={`${number(s.peakConnected)} peak connected`}
+            spark={series.map((x) => x.snapshot.connected)}
             accent
           />
         ) : (
@@ -1433,13 +1612,15 @@ function TestDetail({ id }: { id: string }) {
         )}
         <Metric
           label="PUBLISHED"
-          value={number(s.published)}
+          value={<NumberTicker value={s.published} format={number} />}
           sub={`${number(s.received)} received`}
+          spark={series.map((x) => x.messageRate)}
         />
         <Metric
           label="P95 LATENCY"
-          value={latency(s.p95)}
+          value={<NumberTicker value={s.p95} format={latency} />}
           sub={`P99 ${latency(s.p99)}`}
+          spark={series.map((x) => x.snapshot.p95)}
         />
         <Metric
           label="TOTAL ERRORS"
@@ -1495,51 +1676,40 @@ function TestDetail({ id }: { id: string }) {
             />
           )}
         </section>
-      ) : (
+      ) : tab === "Run log" ? (
+        <RunConsole
+          startedAt={t.startedAt}
+          samples={metrics.data || []}
+          events={events.data || []}
+          running={t.status === "running"}
+          tall
+        />
+      ) : tab === "Latency" ? (
         <>
-          <section className="panel">
-            <div className="panel-heading">
-              <h2>
-                {tab === "Latency"
-                  ? "Publish latency · P95"
-                  : tab === "Connections"
-                    ? "Connected clients"
-                    : "Message throughput"}
-              </h2>
-              <span className="chart-key">
-                <i />{" "}
-                {tab === "Latency"
-                  ? "Milliseconds"
-                  : tab === "Connections"
-                    ? "Clients"
-                    : "Messages / second"}
-              </span>
-            </div>
-            {metrics.error ? (
-              <ErrorNotice error={metrics.error} />
-            ) : (
-              <Chart
-                samples={metrics.data || []}
-                label={
-                  tab === "Latency"
-                    ? "P95 latency"
-                    : tab === "Connections"
-                      ? "Connected"
-                      : "Messages / second"
-                }
-                field={
-                  tab === "Latency"
-                    ? "p95"
-                    : tab === "Connections"
-                      ? "connected"
-                      : "messageRate"
-                }
-              />
-            )}
+          <ChartPanel metrics={metrics} field="p95" />
+          <LatencyPanel snapshot={s} />
+          <section className="panel side-panel">
+            <h2>Delivery telemetry</h2>
+            {[
+              ["Publish attempts", number(s.publishAttempts)],
+              ["Publish errors", number(s.publishErrors)],
+              ["Missed publish slots", number(s.publishSlotsMissed || 0)],
+              ["Clock-skewed correlations", number(s.correlationRejected || 0)],
+              ["Bytes sent", bytes(s.bytesSent)],
+              ["Messages received", number(s.received)],
+              ["Bytes received", bytes(s.bytesReceived)],
+              ["P50 latency", latency(s.p50)],
+            ].map(([k, v]) => (
+              <div className="plan-row" key={k}>
+                <span>{k}</span>
+                <strong className="mono">{v}</strong>
+              </div>
+            ))}
           </section>
-          {tab === "Latency" && <LatencyPanel snapshot={s} />}
-          <AddressDistribution snapshot={s} samples={metrics.data || []} />
-          <BalancePanel balance={t.balance || liveBalance(brokers.data)} />
+        </>
+      ) : tab === "Connections" ? (
+        <>
+          <ChartPanel metrics={metrics} field="connected" />
           <div className="two-col">
             <section className="panel side-panel">
               <h2>Connection telemetry</h2>
@@ -1563,31 +1733,80 @@ function TestDetail({ id }: { id: string }) {
               failures={s.connectFailures}
               connack={s.connackReasons}
             />
-            <section className="panel side-panel">
-              <h2>Delivery telemetry</h2>
-              {[
-                ["Publish attempts", number(s.publishAttempts)],
-                ["Publish errors", number(s.publishErrors)],
-                ["Missed publish slots", number(s.publishSlotsMissed || 0)],
-                [
-                  "Clock-skewed correlations",
-                  number(s.correlationRejected || 0),
-                ],
-                ["Bytes sent", bytes(s.bytesSent)],
-                ["Messages received", number(s.received)],
-                ["Bytes received", bytes(s.bytesReceived)],
-                ["P50 latency", latency(s.p50)],
-              ].map(([k, v]) => (
-                <div className="plan-row" key={k}>
-                  <span>{k}</span>
-                  <strong className="mono">{v}</strong>
-                </div>
-              ))}
-            </section>
           </div>
+          <AddressDistribution snapshot={s} samples={metrics.data || []} />
+          <BalancePanel balance={t.balance || liveBalance(brokers.data)} />
+        </>
+      ) : (
+        <>
+          {t.thresholds?.length > 0 && (
+            <div
+              className="threshold-strip"
+              role="list"
+              aria-label="Thresholds"
+            >
+              {t.thresholds.map((x) => (
+                <button
+                  key={x.name}
+                  role="listitem"
+                  className={`threshold-chip ${x.passed ? "pass" : "fail"}`}
+                  onClick={() => setTab("Thresholds")}
+                  title={`${x.expression} · observed ${x.observed}`}
+                >
+                  <span className={`check-pill ${x.passed ? "pass" : "fail"}`}>
+                    {x.passed ? "pass" : "fail"}
+                  </span>
+                  {x.name.replace(/_/g, " ")}
+                  <span className="mono">{x.observed}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="chart-grid">
+            <ChartPanel metrics={metrics} field="messageRate" />
+            <ChartPanel metrics={metrics} field="connected" />
+            <ChartPanel metrics={metrics} field="p95" />
+            <ChartPanel metrics={metrics} field="byteRate" />
+          </div>
+          <RunConsole
+            startedAt={t.startedAt}
+            samples={metrics.data || []}
+            events={events.data || []}
+            running={t.status === "running"}
+          />
         </>
       )}
     </>
+  );
+}
+const chartInfo = {
+  messageRate: ["Message throughput", "Messages / second"],
+  connected: ["Connected clients", "Clients"],
+  p95: ["Publish latency · P95", "Milliseconds"],
+  byteRate: ["Bandwidth", "Bytes / second"],
+} as const;
+function ChartPanel({
+  metrics,
+  field,
+}: {
+  metrics: { data?: Sample[]; error: unknown };
+  field: keyof typeof chartInfo;
+}) {
+  const [title, unit] = chartInfo[field];
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>{title}</h2>
+        <span className="chart-key">
+          <i /> {unit}
+        </span>
+      </div>
+      {metrics.error ? (
+        <ErrorNotice error={metrics.error} />
+      ) : (
+        <Chart samples={metrics.data || []} label={title} field={field} />
+      )}
+    </section>
   );
 }
 function readStorage<T>(key: string, fallback: T): T {
@@ -1843,28 +2062,11 @@ function Workers() {
       {workers.error && <ErrorNotice error={workers.error} />}
       <div className="worker-grid">
         {workers.data?.map((w) => (
-          <section className="panel side-panel" key={w.id}>
-            <div className="worker-heading">
-              <Server size={24} />
-              <Badge status={w.status} />
-            </div>
-            <h2 className="mono">{w.id}</h2>
-            <div className="plan-row">
-              <span>CPU cores</span>
-              <strong>{w.cpuCount}</strong>
-            </div>
-            <div className="plan-row">
-              <span>Process memory</span>
-              <strong>{bytes(w.memoryBytes)}</strong>
-            </div>
-            <div className="plan-row">
-              <span>Connected clients</span>
-              <strong>{number(w.connected)}</strong>
-            </div>
-            <small className="subdued">
-              Last seen {new Date(w.lastSeen).toLocaleString()}
-            </small>
-          </section>
+          <WorkerCard
+            key={w.id}
+            worker={w}
+            badge={<Badge status={w.status} />}
+          />
         ))}
       </div>
       {!workers.isLoading && !workers.data?.length && !workers.error && (
@@ -2277,6 +2479,7 @@ function Shell() {
             <strong>MQTT performance lab</strong>
           </div>
           <div className="topbar-actions">
+            <TimeZonePicker />
             <span className="environment">
               <i /> LOCAL
             </span>

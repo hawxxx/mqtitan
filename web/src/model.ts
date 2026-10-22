@@ -113,6 +113,12 @@ export interface Balance {
   zoneSkew: number;
   zoneRatio: number | null;
 }
+export interface LogEvent {
+  seq: number;
+  time: string;
+  level: "info" | "action" | "warn" | "error";
+  message: string;
+}
 export interface Sample {
   timestamp: string;
   snapshot: Snapshot;
@@ -132,6 +138,27 @@ export interface Worker {
   memoryBytes: number;
   connected: number;
   lastSeen: string;
+  clockOffsetMs: number;
+  supportsLiveControl?: boolean;
+  host?: WorkerHost;
+}
+export interface WorkerHost {
+  hostname?: string;
+  os: string;
+  arch: string;
+  distro?: string;
+  kernel?: string;
+  cpuModel?: string;
+  cpus: number;
+  cpuLimit?: number;
+  memoryTotalBytes?: number;
+  memoryLimitBytes?: number;
+  openFiles?: number;
+  ephemeralPorts?: number;
+  container?: string;
+  goVersion: string;
+  version?: string;
+  startedAt: string;
 }
 export interface Check {
   Name: string;

@@ -1,5 +1,5 @@
-import { it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { it, expect, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Dashboard,
@@ -12,9 +12,34 @@ import {
 } from "./App";
 import userEvent from "@testing-library/user-event";
 import { parse } from "yaml";
+// Reduced motion makes the wizard close synchronously; one test below covers
+// the animated exit.
+const motion = (reduce: boolean) =>
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: reduce && query.includes("reduce"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }));
+beforeEach(() => motion(true));
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+it("plays the wizard exit animation before closing", async () => {
+  motion(false);
+  const close = vi.fn();
+  const { container } = render(<Wizard done={() => {}} close={close} />);
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(
+    container.ownerDocument.querySelector(".modal-backdrop.leaving"),
+  ).not.toBeNull();
+  expect(close).not.toHaveBeenCalled();
+  await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
 });
 it("lets the wizard select a certificate profile for secure WebSocket tests", async () => {
   vi.stubGlobal(
@@ -74,9 +99,7 @@ it("shows an honest empty dashboard when there are no recorded runs", () => {
       <Dashboard tests={[]} open={() => {}} create={() => {}} />
     </QueryClientProvider>,
   );
-  expect(
-    screen.getByText("No tests yet"),
-  ).toBeTruthy();
+  expect(screen.getByText("No tests yet")).toBeTruthy();
   expect(screen.queryByText("12,480")).toBeNull();
 });
 it("creates a scenario from wizard inputs and presents YAML for review", async () => {
