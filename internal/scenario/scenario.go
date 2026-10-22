@@ -73,6 +73,8 @@ type TLS struct {
 	KeyFile            string `yaml:"keyFile,omitempty"`
 	ServerName         string `yaml:"serverName,omitempty"`
 	InsecureSkipVerify bool   `yaml:"insecureSkipVerify,omitempty"`
+	// HostnameVerification is "", "san", "cn-fallback" or "none".
+	HostnameVerification string `yaml:"hostnameVerification,omitempty"`
 }
 
 type Clients struct {
@@ -174,8 +176,16 @@ func (s Scenario) Validate() error {
 	if (tls.Profile != "" && (hasPEM || hasFiles)) || (hasPEM && hasFiles) {
 		problems = append(problems, "TLS profile, PEM material and file paths cannot be combined")
 	}
-	if (tls.Profile != "" || hasPEM || hasFiles || tls.ServerName != "") && u != nil && u.Scheme != "mqtts" && u.Scheme != "wss" {
+	if (tls.Profile != "" || hasPEM || hasFiles || tls.ServerName != "" || tls.HostnameVerification != "") && u != nil && u.Scheme != "mqtts" && u.Scheme != "wss" {
 		problems = append(problems, "TLS settings require mqtts or wss")
+	}
+	switch tls.HostnameVerification {
+	case "", "san", "cn-fallback", "none":
+	default:
+		problems = append(problems, "broker.tls.hostnameVerification must be san, cn-fallback or none")
+	}
+	if tls.HostnameVerification != "" && tls.InsecureSkipVerify {
+		problems = append(problems, "broker.tls.hostnameVerification cannot be combined with insecureSkipVerify")
 	}
 	if s.Clients.Count <= 0 {
 		problems = append(problems, "clients.count must be positive")

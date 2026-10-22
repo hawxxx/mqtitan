@@ -33,7 +33,7 @@ Use an actual profile ID from your controller. Profile references are controller
 - Listing/upload responses return only profile metadata, including fingerprint and expiry. Private keys are never downloadable through the certificate API or included in test reports.
 - Controller and trusted workers necessarily handle decrypted credentials in memory to establish TLS connections. Workers receive resolved PEM data over their authenticated controller connection, not local filesystem paths. **Use HTTPS for remote dashboard and worker/controller traffic.** Browser uploads over non-loopback HTTP are blocked; configure TLS termination at the reverse proxy for remote installations.
 - These profiles share the controller's administrative authentication boundary; there is no per-user profile isolation/RBAC. Treat every authorized worker and administrator as trusted with load-test credentials.
-- TLS verification remains enabled. Do not use certificate uploads to bypass server-name validation.
+- TLS verification remains enabled. Certificate uploads do not bypass server-name validation. For brokers whose certificate only carries a Common Name, `broker.tls.hostnameVerification: cn-fallback` keeps chain and name verification, `none` keeps chain verification only, and `insecureSkipVerify` disables both.
 
 If the AWS load balancer terminates TLS, client TLS credentials authenticate to that load balancer. Configure the load balancer/HAProxy separately for backend TLS or certificate forwarding. The tool does not configure or automatically bridge those trust boundaries.
 

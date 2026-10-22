@@ -85,6 +85,16 @@ func NewConnector(b scenario.Broker) (*Connector, error) {
 	if cfg.ServerName == "" {
 		cfg.ServerName = u.Hostname()
 	}
+	if mode := b.TLS.HostnameVerification; mode == "cn-fallback" || mode == "none" {
+		roots := cfg.RootCAs
+		if roots == nil {
+			if roots, err = x509.SystemCertPool(); err != nil {
+				return nil, errors.New("TLS system trust roots unavailable")
+			}
+		}
+		cfg.InsecureSkipVerify = true // chain and name are verified by VerifyConnection
+		cfg.VerifyConnection = verifyPeer(roots, mode, cfg.ServerName)
+	}
 	return &Connector{b, u, cfg}, nil
 }
 func Connect(parent context.Context, b scenario.Broker, id string, receive func([]byte)) (Client, error) {
