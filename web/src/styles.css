@@ -2532,10 +2532,10 @@ footer {
     0 30px 90px -20px #000a;
   animation: modal-in 320ms var(--ease-out) backwards;
 }
+/* Opaque: a backdrop-filter nested in the glass modal does not blur the
+   fields scrolling beneath it, so they showed through the sticky footer. */
 .modal-footer {
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--panel);
   border-top-color: var(--glass-border);
 }
 @keyframes fade-in {
@@ -3149,6 +3149,10 @@ input[type="checkbox"]:disabled {
   align-items: center;
   gap: 12px;
 }
+.editor-heading-actions > .mono {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
 .panel .import-button {
   padding: 5px 10px;
   font-size: 12px;
@@ -3463,4 +3467,11 @@ input[hidden] {
 }
 .balance-pager {
   margin-top: 6px;
+}
+/* Theme the scrollbars; the native square bar cut the modal's rounded corners. */
+:root {
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+.modal {
+  scrollbar-width: thin;
 }
