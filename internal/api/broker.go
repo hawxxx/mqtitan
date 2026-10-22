@@ -82,16 +82,35 @@ func (m *Manager) Brokers(id string) ([]emqx.FleetSample, error) {
 	return out, nil
 }
 
-// startTelemetry polls the scenario's telemetry source on the controller. With
-// baseline "first" it takes one synchronous sample before returning, so the
-// caller can start the engine afterwards. The returned function stops the
-// poller and waits for it.
-func (m *Manager) startTelemetry(ctx context.Context, r *execution, t scenario.Telemetry) func() {
+func (m *Manager) telemetryCreds(fromAPI bool) emqx.Credentials {
 	m.mu.Lock()
-	creds, every := m.creds, m.telemetryEvery
-	if r.fromAPI {
+	defer m.mu.Unlock()
+	creds := m.creds
+	if fromAPI {
 		creds.AllowedHosts = m.telemetryHosts
 	}
+	return creds
+}
+
+// fetchBaseline takes the baseline "first" sample. startTest calls it before
+// any worker assignment exists and before the local engine starts, so the
+// baseline never includes the test's own connections.
+func (m *Manager) fetchBaseline(ctx context.Context, t scenario.Telemetry, fromAPI bool) *emqx.FleetSample {
+	if t.Baseline != "first" {
+		return nil
+	}
+	s := emqx.FetchFleet(ctx, t, m.telemetryCreds(fromAPI), nil)
+	s.Baseline = true
+	return &s
+}
+
+// startTelemetry polls the scenario's telemetry source on the controller. A
+// non-nil first is the baseline sample taken by fetchBaseline; later samples
+// subtract it. The returned function stops the poller and waits for it.
+func (m *Manager) startTelemetry(ctx context.Context, r *execution, t scenario.Telemetry, first *emqx.FleetSample) func() {
+	creds := m.telemetryCreds(r.fromAPI)
+	m.mu.Lock()
+	every := m.telemetryEvery
 	m.mu.Unlock()
 	if every <= 0 {
 		every = t.PollInterval()
@@ -106,11 +125,9 @@ func (m *Manager) startTelemetry(ctx context.Context, r *execution, t scenario.T
 		m.notify(r, Event{"broker", s})
 		m.mu.Unlock()
 	}
-	if t.Baseline == "first" {
-		s := emqx.FetchFleet(ctx, t, creds, nil)
-		s.Baseline = true
-		baseline = emqx.NewBaseline(s)
-		record(s)
+	if first != nil {
+		baseline = emqx.NewBaseline(*first)
+		record(*first)
 	}
 	pctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -119,8 +136,8 @@ func (m *Manager) startTelemetry(ctx context.Context, r *execution, t scenario.T
 		defer wg.Done()
 		ticker := time.NewTicker(every)
 		defer ticker.Stop()
-		for first := t.Baseline != "first"; ; first = false {
-			if !first {
+		for immediate := first == nil; ; immediate = false {
+			if !immediate {
 				select {
 				case <-pctx.Done():
 					return

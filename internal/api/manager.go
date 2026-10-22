@@ -179,6 +179,10 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 	if err != nil {
 		return Test{}, err
 	}
+	var baseline *emqx.FleetSample
+	if s.Telemetry != nil {
+		baseline = m.fetchBaseline(m.ctx, *s.Telemetry, fromAPI)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -209,17 +213,17 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 	}
 	m.runs[t.ID] = r
 	m.wg.Add(1)
-	go m.execute(ctx, r, s)
+	go m.execute(ctx, r, s, baseline)
 	return publicTest(t), nil
 }
 
-func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario) {
+func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario, baseline *emqx.FleetSample) {
 	ctx, span := otel.Tracer("mqtitan/controller").Start(ctx, "scenario.execute")
 	defer span.End()
 	defer m.wg.Done()
 	stopTelemetry := func() {}
 	if s.Telemetry != nil {
-		stopTelemetry = m.startTelemetry(ctx, r, *s.Telemetry)
+		stopTelemetry = m.startTelemetry(ctx, r, *s.Telemetry, baseline)
 	}
 	done := make(chan error, 1)
 	e := engine.Engine{Scenario: s, Metrics: r.counters, Control: r.control}

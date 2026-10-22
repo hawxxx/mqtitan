@@ -142,7 +142,8 @@ func TestBaselineSampleTakenBeforeEngineStarts(t *testing.T) {
 	}
 	waitFor(t, "second sample", func() bool { v, _ := m.Brokers(test.ID); return len(v) >= 2 })
 	_ = m.Stop(test.ID)
-	if a := attemptsAtBaseline.Load(); a != 0 {
+	// -1: the baseline was fetched before the run (and its engine) existed.
+	if a := attemptsAtBaseline.Load(); a > 0 {
 		t.Fatalf("engine had %d connect attempts when the baseline was fetched", a)
 	}
 	v, _ := m.Brokers(test.ID)
@@ -152,6 +153,61 @@ func TestBaselineSampleTakenBeforeEngineStarts(t *testing.T) {
 	if c := v[1].Targets[0]; c.Raw != 200 || c.Connections != 100 {
 		t.Fatalf("baseline not subtracted: %+v", c)
 	}
+}
+
+func TestDistributedBaselineTakenBeforeAssignment(t *testing.T) {
+	var m *Manager
+	var calls atomic.Int64
+	var assignedAtBaseline atomic.Int64
+	assignedAtBaseline.Store(-1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v5/nodes" {
+			w.WriteHeader(500)
+			return
+		}
+		if calls.Add(1) == 1 {
+			m.workers.mu.Lock()
+			n := 0
+			for _, wk := range m.workers.workers {
+				if wk.assignment != nil {
+					n++
+				}
+			}
+			m.workers.mu.Unlock()
+			assignedAtBaseline.Store(int64(n))
+		}
+		_, _ = fmt.Fprint(w, `[{"node":"n","live_connections":7}]`)
+	}))
+	defer srv.Close()
+	m, _ = setup(t)
+	m.SetCredentials(emqx.Credentials{APIKey: "k", APISecret: "s"})
+	m.SetTelemetryAllowedHosts("127.0.0.1")
+	m.telemetryEvery = 50 * time.Millisecond
+	for _, id := range []string{"a", "b"} {
+		if _, err := m.workers.register(Worker{ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw := strings.Replace(telemetryScenario(srv.URL, "first", ""), "count: 1", "count: 2", 1)
+	raw = strings.Replace(raw, "clients: 1", "clients: 2", 1)
+	test, err := m.StartOnWorkers(raw, []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := assignedAtBaseline.Load(); a != 0 {
+		t.Fatalf("%d assignments existed when the baseline was fetched", a)
+	}
+	waitFor(t, "baseline sample", func() bool { v, _ := m.Brokers(test.ID); return len(v) > 0 })
+	v, _ := m.Brokers(test.ID)
+	if !v[0].Baseline {
+		t.Fatalf("baseline sample not recorded first: %+v", v)
+	}
+	_ = m.Stop(test.ID)
+	m.workers.mu.Lock()
+	for _, w := range m.workers.workers {
+		w.report.Done = true
+	}
+	m.workers.mu.Unlock()
 }
 
 func TestAPITelemetryHostAllowlist(t *testing.T) {
