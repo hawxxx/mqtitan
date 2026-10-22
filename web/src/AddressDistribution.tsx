@@ -34,28 +34,30 @@ function CountTable({
   return (
     <div className="address-table">
       <h3>{title}</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>{showLabel ? "Address" : "Key"}</th>
-            {showLabel && <th>Label</th>}
-            {showShare && <th>Active</th>}
-            <th>{connectsHeader || "Connects"}</th>
-            {showShare && <th>Share of active</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.key}>
-              <td className="mono">{r.key}</td>
-              {showLabel && <td>{r.label || "—"}</td>}
-              {showShare && <td>{number(r.active)}</td>}
-              <td>{number(r.connects)}</td>
-              {showShare && <td>{share(r.active, total)}</td>}
+      <div className="address-table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>{showLabel ? "Address" : "Key"}</th>
+              {showLabel && <th>Label</th>}
+              {showShare && <th>Active</th>}
+              <th>{connectsHeader || "Connects"}</th>
+              {showShare && <th>Share of active</th>}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td className="mono">{r.key}</td>
+                {showLabel && <td>{r.label || "—"}</td>}
+                {showShare && <td>{number(r.active)}</td>}
+                <td>{number(r.connects)}</td>
+                {showShare && <td>{share(r.active, total)}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -64,7 +66,7 @@ function StackedBars({ samples, keys }: { samples: Sample[]; keys: string[] }) {
   const recent = samples.slice(-MAX_BARS);
   if (recent.length < 2 || keys.length === 0) return null;
   return (
-    <div>
+    <div className="address-stack-block">
       <div
         className="address-stack"
         role="img"

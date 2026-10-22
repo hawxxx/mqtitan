@@ -75,7 +75,7 @@ it("shows an honest empty dashboard when there are no recorded runs", () => {
     </QueryClientProvider>,
   );
   expect(
-    screen.getByText("Your performance baseline starts here"),
+    screen.getByText("No tests yet"),
   ).toBeTruthy();
   expect(screen.queryByText("12,480")).toBeNull();
 });

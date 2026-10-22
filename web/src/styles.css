@@ -2053,7 +2053,7 @@ textarea:focus {
   display: flex;
   flex-direction: column;
 }
-.editor-layout > .editor textarea {
+.editor-layout > .editor .yaml-editor {
   flex: 1;
 }
 .compare-when {
@@ -2129,6 +2129,531 @@ textarea:focus {
   color: var(--muted);
   font-size: 11px;
 }
-.balance-tiles{display:flex;gap:1.5rem;flex-wrap:wrap;margin:.5rem 0}
-.balance-row{display:grid;grid-template-columns:minmax(6rem,12rem) 1fr 5rem;gap:.75rem;align-items:center}
-.balance-row progress{width:100%}
+.balance-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 23px;
+}
+.balance-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.balance-stat span {
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.balance-stat strong {
+  font: 500 14px "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.balance-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.balance-zones-missing {
+  padding: 0 23px 16px;
+}
+.balance-panel .notice {
+  margin: 16px 23px 0;
+}
+.balance-panel .address-table {
+  padding-bottom: 12px;
+}
+.balance-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 12rem) 1fr 6rem;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 23px;
+  font-size: 12px;
+}
+.balance-row > span:last-child {
+  text-align: right;
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.balance-row .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.balance-row progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.balance-row progress::-webkit-progress-bar {
+  background: transparent;
+}
+.balance-row progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--teal) 60%, transparent), var(--teal));
+  transition: inline-size 400ms var(--ease-out);
+}
+.balance-row progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--teal);
+}
+/* Glass surfaces and motion. Frosted panels float over a slow ambient glow;
+   reduced-motion users get the static glass without animation (see above). */
+:root {
+  --glass: color-mix(in srgb, var(--panel) 58%, transparent);
+  --glass-strong: color-mix(in srgb, var(--panel) 80%, transparent);
+  --glass-border: color-mix(in srgb, #fff 9%, transparent);
+  --glass-edge: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+  --glass-shadow: 0 18px 40px -24px #000c;
+  --glass-blur: blur(18px) saturate(150%);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --orb-opacity: 0.42;
+}
+[data-theme="light"] {
+  --glass: color-mix(in srgb, #fff 56%, transparent);
+  --glass-strong: color-mix(in srgb, #fff 82%, transparent);
+  --glass-border: color-mix(in srgb, #fff 75%, var(--line));
+  --glass-edge: inset 0 1px 0 #fffc;
+  --glass-shadow: 0 18px 40px -26px #1d3a4566;
+  --orb-opacity: 0.38;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  [data-theme="light"] {
+    --glass: var(--panel);
+    --glass-strong: var(--panel);
+  }
+}
+body {
+  background: var(--bg);
+}
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ambient i {
+  position: absolute;
+  width: 46vmax;
+  height: 46vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: var(--orb-opacity);
+  animation: orb-drift 32s var(--ease-out) infinite alternate;
+}
+.ambient i:nth-child(1) {
+  top: -18vmax;
+  left: 4vmax;
+  background: radial-gradient(circle, var(--teal), transparent 68%);
+}
+.ambient i:nth-child(2) {
+  right: -16vmax;
+  top: 18vh;
+  background: radial-gradient(circle, #3a7bd5, transparent 68%);
+  opacity: calc(var(--orb-opacity) * 0.7);
+  animation-duration: 40s;
+  animation-delay: -12s;
+}
+.ambient i:nth-child(3) {
+  bottom: -24vmax;
+  left: 34vw;
+  background: radial-gradient(circle, var(--amber), transparent 68%);
+  opacity: calc(var(--orb-opacity) * 0.45);
+  animation-duration: 46s;
+  animation-delay: -24s;
+}
+@keyframes orb-drift {
+  to {
+    transform: translate3d(6vmax, 4vmax, 0) scale(1.12);
+  }
+}
+.sidebar,
+.topbar,
+.panel,
+.metrics,
+.dashboard-intro,
+.modal {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.sidebar {
+  background: var(--glass);
+  border-right-color: var(--glass-border);
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border-bottom-color: var(--glass-border);
+}
+.panel,
+.metrics {
+  position: relative;
+  background: var(--glass);
+  border-color: var(--glass-border);
+  border-radius: 14px;
+  box-shadow: var(--glass-edge), var(--glass-shadow);
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+.panel:hover,
+.metrics:hover {
+  border-color: color-mix(in srgb, var(--teal) 28%, var(--glass-border));
+}
+.panel-heading {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  border-bottom-color: var(--glass-border);
+}
+.panel-footer,
+.metric {
+  border-color: var(--glass-border);
+}
+thead {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.dashboard-intro {
+  background: linear-gradient(
+    115deg,
+    color-mix(in srgb, var(--teal) 10%, var(--glass)),
+    var(--glass) 55%
+  );
+  border-color: var(--glass-border);
+  border-left-color: var(--teal);
+  border-radius: 16px;
+  box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+/* Magic UI Border Beam. */
+.magic-border-beam {
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  pointer-events: none;
+  mask:
+    linear-gradient(transparent, transparent) padding-box,
+    linear-gradient(#000, #000) border-box;
+  mask-composite: intersect;
+}
+.magic-border-beam > div {
+  position: absolute;
+  width: var(--beam-size);
+  aspect-ratio: 1;
+  background: linear-gradient(
+    to left,
+    var(--beam-from),
+    var(--beam-to),
+    transparent
+  );
+  offset-path: rect(0 auto auto 0 round var(--beam-size));
+  animation: border-beam var(--beam-duration) linear var(--beam-delay) infinite;
+}
+@keyframes border-beam {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+.workspace,
+.count,
+.estimate {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-color: var(--glass-border);
+}
+.workspace {
+  border-radius: 10px;
+  transition: background-color 200ms ease;
+}
+.workspace:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+nav a {
+  border-radius: 9px;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 220ms var(--ease-out);
+}
+nav a:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  transform: translateX(2px);
+}
+nav a.active {
+  background: color-mix(in srgb, var(--teal) 16%, transparent);
+  border-color: color-mix(in srgb, var(--teal) 32%, transparent);
+  box-shadow:
+    inset 3px 0 0 var(--teal),
+    0 0 24px -10px var(--teal);
+}
+button {
+  border-radius: 8px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 220ms ease,
+    transform 160ms var(--ease-out);
+}
+button:not(.primary, .text-button, .theme-button, .tabs button, .modal-heading button) {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-edge);
+}
+button:not(.primary, .text-button, .theme-button, .tabs button, .modal-heading button):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  border-color: color-mix(in srgb, var(--text) 20%, transparent);
+}
+button.primary {
+  box-shadow:
+    inset 0 1px 0 #fff5,
+    0 6px 20px -8px var(--teal);
+}
+button.primary:hover:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 #fff6,
+    0 10px 28px -8px var(--teal);
+  transform: translateY(-1px);
+}
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+input,
+select,
+textarea {
+  background: color-mix(in srgb, var(--field) 70%, transparent);
+  border-color: var(--glass-border);
+  border-radius: 8px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 200ms ease;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--teal) 16%, transparent);
+}
+.tabs {
+  border-bottom-color: var(--glass-border);
+}
+.tabs button {
+  border-bottom: 2px solid transparent;
+  transition:
+    color 160ms ease,
+    border-color 220ms var(--ease-out);
+}
+.tabs button:hover {
+  color: var(--text);
+}
+.badge {
+  border-radius: 999px;
+}
+footer {
+  border-top-color: var(--glass-border);
+}
+/* Live indicators breathe. */
+.engine-state i:not(.offline),
+.environment i,
+.nav-dot,
+.badge.running i {
+  animation: live-pulse 2.4s ease-out infinite;
+}
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 60%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+/* Route changes: Magic UI Blur Fade, staggered over the first sections.
+   Fill mode "backwards" leaves no transform or filter behind once settled,
+   so sticky headers and fixed overlays keep working. */
+.page-enter > * {
+  animation: blur-fade 520ms var(--ease-out) backwards;
+}
+.page-enter > :nth-child(2) {
+  animation-delay: 60ms;
+}
+.page-enter > :nth-child(3) {
+  animation-delay: 120ms;
+}
+.page-enter > :nth-child(4) {
+  animation-delay: 180ms;
+}
+.page-enter > :nth-child(n + 5) {
+  animation-delay: 240ms;
+}
+@keyframes blur-fade {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(6px);
+  }
+}
+.modal-backdrop {
+  background: color-mix(in srgb, #000 45%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  animation: fade-in 220ms ease backwards;
+}
+.modal {
+  background: var(--glass-strong);
+  border-color: var(--glass-border);
+  border-radius: 18px;
+  box-shadow:
+    var(--glass-edge),
+    0 30px 90px -20px #000a;
+  animation: modal-in 320ms var(--ease-out) backwards;
+}
+.modal-footer {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border-top-color: var(--glass-border);
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+/* YAML syntax colours, shared by the read-only view and the editor overlay. */
+:root {
+  --yaml-key: #76ddca;
+  --yaml-string: #e4b467;
+  --yaml-number: #c3a6ff;
+  --yaml-literal: #f29bbd;
+  --yaml-anchor: #8fb8ff;
+  --yaml-punct: #6f8791;
+  --yaml-comment: #6f8791;
+}
+[data-theme="light"] {
+  --yaml-key: #0b7a66;
+  --yaml-string: #8a5a12;
+  --yaml-number: #6b46c1;
+  --yaml-literal: #b0336b;
+  --yaml-anchor: #2f5fb3;
+  --yaml-punct: #8a9aa1;
+  --yaml-comment: #7a8d95;
+}
+.yaml-read,
+[data-theme="light"] .yaml-read {
+  color: var(--text);
+  tab-size: 2;
+}
+.yaml-key {
+  color: var(--yaml-key);
+}
+.yaml-string {
+  color: var(--yaml-string);
+}
+.yaml-number {
+  color: var(--yaml-number);
+}
+.yaml-literal {
+  color: var(--yaml-literal);
+}
+.yaml-anchor {
+  color: var(--yaml-anchor);
+}
+.yaml-punct {
+  color: var(--yaml-punct);
+}
+.yaml-comment {
+  color: var(--yaml-comment);
+  font-style: italic;
+}
+.yaml-editor {
+  display: grid;
+  background: color-mix(in srgb, var(--field) 70%, transparent);
+}
+.yaml-editor > pre,
+.panel .yaml-editor > textarea {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  border-radius: 0;
+  font: 12px / 1.9 "IBM Plex Mono", monospace;
+  letter-spacing: 0;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.yaml-editor > pre {
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+}
+.panel .yaml-editor > textarea {
+  position: relative;
+  min-height: 650px;
+  overflow: auto;
+  resize: vertical;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--teal);
+  box-shadow: none;
+}
+.yaml-editor > textarea::selection {
+  background: color-mix(in srgb, var(--teal) 30%, transparent);
+  color: transparent;
+}
+@media (max-width: 850px) {
+  .panel .yaml-editor > textarea {
+    min-height: 520px;
+  }
+}
+/* Broker address distribution: compact sub-sections inside one panel. */
+.address-table + .address-table,
+.address-stack-block + .address-table {
+  border-top: 1px solid var(--glass-border);
+}
+.address-table h3 {
+  padding: 16px 23px 10px;
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.address-table-scroll {
+  overflow-x: auto;
+}
+.address-table td.mono {
+  overflow-wrap: anywhere;
+}
+.address-stack-block {
+  padding: 4px 23px 16px;
+}
+.address-stack-block > p {
+  margin-top: 10px;
+  font-size: 11px;
+}

@@ -60,36 +60,56 @@ export function liveBalance(samples: FleetSample[] | undefined): Balance | undef
   };
 }
 
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="balance-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 export function BalancePanel({ balance }: { balance?: Balance }) {
   if (!balance) return null;
   const hasZones = balance.zones.length > 0;
-  const cvSeen = balance.targets.length >= 2 && sumOf(balance.targets) > 0;
+  const observed = sumOf(balance.targets) > 0;
+  const cvSeen = balance.targets.length >= 2 && observed;
   return (
     <section className="panel balance-panel">
-      <h2>Broker balance</h2>
+      <div className="panel-heading">
+        <div>
+          <h2>Broker balance</h2>
+          <p>Connections per broker target and zone, from broker telemetry</p>
+        </div>
+      </div>
       {!balance.complete && (
         <div className="notice warning" role="status">
           <p>Incomplete telemetry: some broker targets did not report, so balance figures may be off.</p>
         </div>
       )}
-      <div className="balance-tiles">
-        {cvSeen ? (
-          <>
-            <strong>CV {pct(balance.targetCV)}</strong>
-            <strong>Max/min {ratio(balance.targetRatio)}</strong>
-          </>
-        ) : (
-          <strong>No observations</strong>
-        )}
+      <div className="balance-stats">
+        <Stat label="Targets" value={number(balance.targets.length)} />
+        {cvSeen && <Stat label="CV" value={pct(balance.targetCV)} />}
+        {cvSeen && <Stat label="Max/min" value={ratio(balance.targetRatio)} />}
         {hasZones && (
-          <strong>Zone skew {sumOf(balance.zones) > 0 && balance.zones.length >= 2 ? pct(balance.zoneSkew) : "—"}</strong>
+          <Stat
+            label="Zone skew"
+            value={sumOf(balance.zones) > 0 && balance.zones.length >= 2 ? pct(balance.zoneSkew) : "—"}
+          />
+        )}
+        {!observed ? (
+          <p className="balance-note">No observations</p>
+        ) : (
+          !cvSeen && <p className="balance-note">Spread statistics need at least two targets.</p>
         )}
       </div>
       <Bars title="Connections per target" groups={balance.targets} />
       {hasZones ? (
         <Bars title="Connections per zone" groups={balance.zones} />
       ) : (
-        <p className="muted">Zone labels missing on one or more targets; zone statistics are unavailable.</p>
+        <p className="balance-note balance-zones-missing">
+          Zone labels missing on one or more targets; zone statistics are unavailable.
+        </p>
       )}
     </section>
   );

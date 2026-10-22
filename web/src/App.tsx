@@ -6,8 +6,10 @@ import { BalancePanel, liveBalance } from "./BalancePanel";
 import { LatencyPanel } from "./LatencyPanel";
 import { CertificateSettings } from "./CertificateSettings";
 import { LiveLoadControls } from "./LiveLoadControls";
+import { BorderBeam } from "./components/magicui/BorderBeam";
 import { GridPattern } from "./components/magicui/GridPattern";
 import { RunAgainButton } from "./RunAgainButton";
+import { YamlEditor, YamlView } from "./YamlCode";
 import {
   createRootRoute,
   createRoute,
@@ -546,6 +548,7 @@ export function Dashboard({
   return (
     <>
       <div className="dashboard-intro">
+        <BorderBeam />
         <GridPattern
           squares={[
             [12, 1],
@@ -556,8 +559,8 @@ export function Dashboard({
         />
         <Title
           eyebrow="OPERATIONS / OVERVIEW"
-          title="Performance at a glance"
-          detail="Your MQTT infrastructure. Measured, not guessed."
+          title="Overview"
+          detail="Active tests and recent results in this workspace."
         >
           <button className="primary" onClick={create}>
             <Plus size={16} /> New test
@@ -591,8 +594,8 @@ export function Dashboard({
         <section className="panel welcome">
           <GridPattern className="welcome-grid" />
           <Empty
-            title="Your performance baseline starts here"
-            detail="Connect a broker, define your workload, and see how your MQTT infrastructure behaves under pressure."
+            title="No tests yet"
+            detail="Create a test to connect to a broker and publish load. Results appear here."
             action={
               <button className="primary" onClick={create}>
                 <Play size={15} /> Create your first test
@@ -1004,7 +1007,7 @@ export function ScenarioEditor({
       <Title
         eyebrow="WORKLOADS / SCENARIOS"
         title="Scenario lab"
-        detail="Versionable workloads. Explicit stages. Repeatable results."
+        detail="YAML workload definitions with explicit stages."
       >
         <button disabled={plan.isPending} onClick={() => plan.mutate()}>
           <Gauge size={16} /> Validate & plan
@@ -1029,12 +1032,7 @@ export function ScenarioEditor({
             </h2>
             <span className="subdued mono">YAML / v1alpha1</span>
           </div>
-          <textarea
-            aria-label="Scenario YAML"
-            spellCheck={false}
-            value={yaml}
-            onChange={(e) => setYaml(e.target.value)}
-          />
+          <YamlEditor label="Scenario YAML" value={yaml} onChange={setYaml} />
           <div className="panel-footer">
             <span>Broker credentials in YAML are sent to the server.</span>
             <span className="mono">{yaml.split("\n").length} lines</span>
@@ -1460,7 +1458,7 @@ function TestDetail({ id }: { id: string }) {
       )}
       {tab === "Scenario" ? (
         <section className="panel">
-          <pre className="yaml-read">{t.scenario}</pre>
+          <YamlView source={t.scenario} />
         </section>
       ) : tab === "Thresholds" ? (
         <section className="panel">
@@ -1935,7 +1933,7 @@ function Compare() {
     <>
       <Title
         eyebrow="ANALYSIS / COMPARE"
-        title="Put performance in perspective"
+        title="Compare runs"
         detail="Compare two recorded runs using their actual result snapshots."
       />
       {q.error && <ErrorNotice error={q.error} />}
@@ -2039,7 +2037,7 @@ function Compare() {
         <section className="panel">
           <Empty
             title="Choose two runs to compare"
-            detail="A baseline and a candidate reveal changes in throughput, latency, and reliability."
+            detail="Pick a baseline and a candidate to see differences in throughput, latency, and reliability."
           />
         </section>
       )}
@@ -2129,7 +2127,7 @@ function SettingsPage() {
     <>
       <Title
         eyebrow="WORKSPACE / SETTINGS"
-        title="Make the lab yours"
+        title="Settings"
         detail="Browser preferences and API access for your workspace."
       />
       <section className="panel side-panel settings-panel">
@@ -2189,12 +2187,18 @@ function Shell() {
     () => localStorage.getItem("mqtitan.theme") || "dark",
   );
   const tests = useTests();
+  const path = useRouterState({ select: (state) => state.location.pathname });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("mqtitan.theme", theme);
   }, [theme]);
   return (
     <div className="app-shell">
+      <div className="ambient" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </div>
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
@@ -2285,7 +2289,7 @@ function Shell() {
             </button>
           </div>
         </header>
-        <main id="main-content" tabIndex={-1}>
+        <main id="main-content" tabIndex={-1} key={path} className="page-enter">
           <PageContent
             tests={tests.data || []}
             error={tests.error}
@@ -2297,9 +2301,7 @@ function Shell() {
           />
         </main>
         <footer>
-          <span>
-            MQTiTan <span className="subdued">/ Engineered for scale.</span>
-          </span>
+          <span>MQTiTan</span>
           <span className="mono">MQTT 3.1.1 · MQTT 5.0</span>
         </footer>
       </div>
@@ -2361,7 +2363,7 @@ function PageContent({
         <>
           <Title
             eyebrow="WORKLOADS / TESTS"
-            title="Every run. Every result."
+            title="Tests"
             detail="Live tests and historical benchmarks in one place."
           >
             <button className="primary" onClick={create}>

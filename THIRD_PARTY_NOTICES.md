@@ -4,6 +4,11 @@
 
 `web/src/components/magicui/GridPattern.tsx` is adapted from the Magic UI registry component at https://magicui.design/r/grid-pattern.json. Layout classes were replaced with project CSS and unused options were removed. The component was selected through the Magic UI MCP registry.
 
+The following are adapted from Magic UI registry components under the same license, also selected through the Magic UI MCP registry:
+
+- `web/src/components/magicui/BorderBeam.tsx` from https://magicui.design/r/border-beam.json, with the motion/react animation replaced by a CSS keyframe.
+- The `blur-fade` page entrance in `web/src/styles.css`, from https://magicui.design/r/blur-fade.json, rewritten as a CSS keyframe.
+
 MIT License
 
 Copyright (c) Magic UI
