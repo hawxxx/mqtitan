@@ -180,6 +180,9 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 			return Test{}, err
 		}
 	}
+	if err = s.ResolveRun(); err != nil {
+		return Test{}, err
+	}
 	s, err = m.resolveCertificates(s)
 	if err != nil {
 		return Test{}, err

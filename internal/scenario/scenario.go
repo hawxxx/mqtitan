@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -139,6 +140,21 @@ func Load(path string) (Scenario, error) {
 		return Scenario{}, err
 	}
 	return Parse(b)
+}
+
+// ResolveRun replaces ${run} in clients.idTemplate with a random per-run token
+// so repeated or overlapping runs against one broker never reuse client IDs.
+// Call it once before partitioning so every worker shares the token.
+func (s *Scenario) ResolveRun() error {
+	if !strings.Contains(s.Clients.IDTemplate, "${run}") {
+		return nil
+	}
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	s.Clients.IDTemplate = strings.ReplaceAll(s.Clients.IDTemplate, "${run}", hex.EncodeToString(b))
+	return nil
 }
 
 func Encode(s Scenario) ([]byte, error) { return yaml.Marshal(s) }
