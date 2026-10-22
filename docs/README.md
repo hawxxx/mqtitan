@@ -1,6 +1,6 @@
 # Documentation
 
-MQTTitan is an engineering preview. Deployment manifests and large scenarios are starting points for qualification, not proof of production capacity.
+MQTiTan is an engineering preview. Deployment manifests and large scenarios are starting points for qualification, not proof of production capacity.
 
 | Task | Guide |
 | --- | --- |

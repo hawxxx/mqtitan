@@ -1,6 +1,6 @@
 # Kubernetes with Helm
 
-This guide deploys MQTTitan, not an EMQX cluster. You need a reachable MQTT broker, Docker/image-registry access, kubectl configured for your cluster, Helm 3, a persistent-volume provisioner, and a CNI that enforces NetworkPolicy. Run commands from the repository root.
+This guide deploys MQTiTan, not an EMQX cluster. You need a reachable MQTT broker, Docker/image-registry access, kubectl configured for your cluster, Helm 3, a persistent-volume provisioner, and a CNI that enforces NetworkPolicy. Run commands from the repository root.
 
 The preview uses one SQLite controller. Do not add controller replicas or share its database with another controller. Workers scale independently, but worker autoscaling and transparent failover are not implemented.
 

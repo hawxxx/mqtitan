@@ -12,6 +12,7 @@
   --text: #dce6e9;
   --muted: #97a9b3;
   --teal: #39c7b0;
+  --silver: #d3dadd;
   --amber: #e4b467;
   --field: #0c1418;
   --hover: #1b282e;
@@ -196,15 +197,9 @@ pre,
   letter-spacing: -0.6px;
 }
 .brand-symbol {
-  height: 41px;
-  width: 38px;
-  color: var(--teal);
-  display: grid;
-  place-items: center;
-  border: 1px solid #286456;
-  border-radius: 8px;
-  transform: rotate(-4deg);
-  background: #12362d;
+  height: 44px;
+  width: auto;
+  flex: none;
 }
 .brand small {
   display: block;
@@ -214,8 +209,11 @@ pre,
   color: var(--muted);
   margin-top: 4px;
 }
-.brand-accent {
+.wordmark {
   color: var(--teal);
+}
+.wordmark .silver {
+  color: var(--silver);
 }
 .workspace {
   display: flex;
@@ -641,6 +639,7 @@ nav a.active:before {
 }
 [data-theme="light"] {
   --teal: #087b69;
+  --silver: #8d999f;
   --muted: #526871;
 }
 [data-theme="light"] button.primary {
@@ -1200,9 +1199,6 @@ textarea:focus {
 [data-theme="light"] .yaml-read {
   color: #226e5b;
 }
-[data-theme="light"] .brand-symbol {
-  background: #daf1e9;
-}
 [data-theme="light"] nav a.active {
   background: #daf1e9;
   color: #216d5a;
@@ -1381,7 +1377,7 @@ textarea:focus {
     padding: 20px 5px;
   }
   .brand-symbol {
-    width: 32px;
+    width: auto;
     height: 36px;
   }
   .main-column {
