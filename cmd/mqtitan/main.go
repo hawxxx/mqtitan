@@ -160,6 +160,9 @@ func quick(args []string) error {
 func printPlan(s scenario.Scenario) {
 	p := s.Plan()
 	fmt.Printf("Scenario: %s\nPeak clients: %d\nDuration: %s\nExpected publish rate: %.0f msg/s\nEstimated payload wire rate: %.2f MiB/s\nEstimated memory (uncalibrated): %.2f GiB\nEstimated file descriptors: %d\n", s.Name, p.PeakClients, p.Duration, p.MessagesPerSecond, p.EstimatedWireBytesPerSecond/1024/1024, float64(p.EstimatedMemoryBytes)/1024/1024/1024, p.EstimatedFileDescriptors)
+	if l := s.Clients.Lifetime; l != nil {
+		fmt.Printf("Lifetime churn: %s to %s (~%.1f connects/s at peak)\n", l.Min.Duration, l.Max.Duration, p.ChurnConnectsPerSecond)
+	}
 	for _, w := range p.Warnings {
 		fmt.Printf("WARN  workload             %s\n", w)
 	}

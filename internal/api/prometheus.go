@@ -18,7 +18,7 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	counters := map[string]uint64{"connections_total": 0, "connection_errors_total": 0, "messages_published_total": 0, "messages_received_total": 0, "publish_errors_total": 0, "bytes_sent_total": 0, "bytes_received_total": 0, "reconnects_total": 0, "disconnects_total": 0, "publishes_cancelled_total": 0, "publish_slots_missed_total": 0, "correlation_rejected_total": 0}
+	counters := map[string]uint64{"connections_total": 0, "connection_errors_total": 0, "messages_published_total": 0, "messages_received_total": 0, "publish_errors_total": 0, "bytes_sent_total": 0, "bytes_received_total": 0, "reconnects_total": 0, "churned_total": 0, "churn_reconnects_total": 0, "disconnects_total": 0, "publishes_cancelled_total": 0, "publish_slots_missed_total": 0, "correlation_rejected_total": 0}
 	var connected int64
 	var count uint64
 	sum := 0.0
@@ -38,6 +38,8 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 		counters["bytes_sent_total"] += s.BytesSent
 		counters["bytes_received_total"] += s.BytesReceived
 		counters["reconnects_total"] += s.Reconnects
+		counters["churned_total"] += s.Churned
+		counters["churn_reconnects_total"] += s.ChurnReconnects
 		counters["disconnects_total"] += s.Disconnects
 		counters["publishes_cancelled_total"] += s.PublishCancelled
 		counters["publish_slots_missed_total"] += s.PublishSlotsMissed

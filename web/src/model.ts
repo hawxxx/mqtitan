@@ -41,6 +41,8 @@ export interface Snapshot {
   subscriptions?: number;
   subscribeErrors?: number;
   reconnects?: number;
+  churned?: number;
+  churnReconnects?: number;
   disconnects?: number;
   publishSlotsMissed?: number;
   correlationRejected?: number;

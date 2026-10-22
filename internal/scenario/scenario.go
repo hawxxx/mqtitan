@@ -99,6 +99,13 @@ type Clients struct {
 	IDTemplate     string `yaml:"idTemplate"`
 	SequenceOffset int    `yaml:"sequenceOffset,omitempty"`
 	Worker         string `yaml:"worker,omitempty"`
+	// Lifetime ends each session after a random duration in [min, max] and
+	// reconnects, producing steady connection churn.
+	Lifetime *Lifetime `yaml:"lifetime,omitempty"`
+}
+type Lifetime struct {
+	Min Duration `yaml:"min"`
+	Max Duration `yaml:"max"`
 }
 type Stage struct {
 	Duration      Duration `yaml:"duration"`
@@ -248,6 +255,13 @@ func (s Scenario) Validate() error {
 	if s.Clients.Count <= 0 {
 		problems = append(problems, "clients.count must be positive")
 	}
+	if l := s.Clients.Lifetime; l != nil {
+		if l.Min.Duration <= 0 {
+			problems = append(problems, "clients.lifetime.min must be positive")
+		} else if l.Max.Duration < l.Min.Duration {
+			problems = append(problems, "clients.lifetime.max must not be less than min")
+		}
+	}
 	if s.Clients.IDTemplate == "" {
 		problems = append(problems, "clients.idTemplate is required")
 	}
@@ -344,6 +358,9 @@ type Plan struct {
 	// Warnings flag workloads that no stage ever reaches; they would silently
 	// contribute nothing (for example subscribers listed after publishers).
 	Warnings []string
+	// ChurnConnectsPerSecond is the steady reconnect rate caused by
+	// clients.lifetime at peak; zero without it.
+	ChurnConnectsPerSecond float64
 }
 
 func (s Scenario) Plan() Plan {
@@ -371,7 +388,23 @@ func (s Scenario) Plan() Plan {
 			rate += float64(n) * w.RatePerClient
 		}
 	}
-	return Plan{peak, duration, rate, payload, int64(peak) * 96 * 1024, peak*2 + 128, rate * float64(payload+64), warnings}
+	churn := 0.0
+	if l := s.Clients.Lifetime; l != nil {
+		if mean := (l.Min.Duration + l.Max.Duration) / 2; mean > 0 {
+			churn = float64(peak) / mean.Seconds()
+		}
+	}
+	return Plan{
+		PeakClients:                 peak,
+		Duration:                    duration,
+		MessagesPerSecond:           rate,
+		PayloadBytes:                payload,
+		EstimatedMemoryBytes:        int64(peak) * 96 * 1024,
+		EstimatedFileDescriptors:    peak*2 + 128,
+		EstimatedWireBytesPerSecond: rate * float64(payload+64),
+		Warnings:                    warnings,
+		ChurnConnectsPerSecond:      churn,
+	}
 }
 
 // ParseAddressPrefix parses a broker.addressLabels CIDR into its masked form.

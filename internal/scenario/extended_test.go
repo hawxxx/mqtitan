@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMultipleWorkloadsAndVersionFive(t *testing.T) {
@@ -155,5 +156,46 @@ workloads: [{type: publisher, clients: 2, topic: test, qos: 0, ratePerClient: 1,
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLifetimeValidation(t *testing.T) {
+	base := `apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: lifetime
+broker: {url: 'mqtt://broker.example.net:1883', version: '3.1.1'}
+clients: {count: 2, idTemplate: 'client-${sequence}', lifetime: {%LIFE%}}
+stages: [{duration: 1s, targetClients: 2}]
+workloads: [{type: publisher, clients: 2, topic: test, qos: 0, ratePerClient: 1, payload: {type: static}}]
+`
+	for _, tt := range []struct{ name, life, want string }{
+		{"zero min", "min: 0s, max: 1s", "clients.lifetime.min must be positive"},
+		{"max below min", "min: 2s, max: 1s", "clients.lifetime.max must not be less than min"},
+		{"equal", "min: 1s, max: 1s", ""},
+		{"range", "min: 1s, max: 3s", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Parse([]byte(strings.Replace(base, "%LIFE%", tt.life, 1)))
+			if tt.want == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlanChurnConnectsPerSecond(t *testing.T) {
+	s := Scenario{Clients: Clients{Count: 10000, Lifetime: &Lifetime{Min: Duration{5 * time.Minute}, Max: Duration{15 * time.Minute}}}, Stages: []Stage{{Duration: Duration{time.Hour}, TargetClients: 10000}}, Workloads: []Workload{{Clients: 10000}}}
+	if got := s.Plan().ChurnConnectsPerSecond; got < 16.6 || got > 16.7 {
+		t.Fatalf("churn rate %v, want ~16.67", got)
+	}
+	s.Clients.Lifetime = nil
+	if got := s.Plan().ChurnConnectsPerSecond; got != 0 {
+		t.Fatalf("churn rate %v without lifetime", got)
 	}
 }

@@ -64,6 +64,8 @@ type Counters struct {
 	PublishCancelled   atomic.Uint64
 	BytesSent          atomic.Uint64
 	Reconnects         atomic.Uint64
+	Churned            atomic.Uint64
+	ChurnReconnects    atomic.Uint64
 	Disconnects        atomic.Uint64
 	// PublishSlotsMissed counts scheduled publish slots skipped because the
 	// previous publish of that client had not completed: the generator, or
@@ -216,6 +218,8 @@ type Snapshot struct {
 	SubscribeErrors     uint64            `json:"subscribeErrors"`
 	CorrelationSamples  uint64            `json:"correlationSamples"`
 	Reconnects          uint64            `json:"reconnects"`
+	Churned             uint64            `json:"churned"`
+	ChurnReconnects     uint64            `json:"churnReconnects"`
 	Disconnects         uint64            `json:"disconnects"`
 	PublishSlotsMissed  uint64            `json:"publishSlotsMissed"`
 	CorrelationRejected uint64            `json:"correlationRejected"`
@@ -251,7 +255,7 @@ type Bucket struct {
 }
 
 func (c *Counters) Snapshot() Snapshot {
-	s := Snapshot{ConnectAttempts: c.ConnectAttempts.Load(), Connected: c.Connected.Load(), TargetClients: c.TargetClients.Load(), Connecting: c.Connecting.Load(), PeakConnected: c.PeakConnected.Load(), ConnectErrors: c.ConnectErrors.Load(), PublishAttempts: c.PublishAttempts.Load(), Published: c.Published.Load(), PublishErrors: c.PublishErrors.Load(), BytesSent: c.BytesSent.Load(), Received: c.Received.Load(), BytesReceived: c.BytesReceived.Load(), Subscriptions: c.Subscriptions.Load(), SubscribeErrors: c.SubscribeErrors.Load(), CorrelationSamples: c.CorrelationSamples.Load(), Reconnects: c.Reconnects.Load(), Disconnects: c.Disconnects.Load(), Errors: map[string]uint64{}}
+	s := Snapshot{ConnectAttempts: c.ConnectAttempts.Load(), Connected: c.Connected.Load(), TargetClients: c.TargetClients.Load(), Connecting: c.Connecting.Load(), PeakConnected: c.PeakConnected.Load(), ConnectErrors: c.ConnectErrors.Load(), PublishAttempts: c.PublishAttempts.Load(), Published: c.Published.Load(), PublishErrors: c.PublishErrors.Load(), BytesSent: c.BytesSent.Load(), Received: c.Received.Load(), BytesReceived: c.BytesReceived.Load(), Subscriptions: c.Subscriptions.Load(), SubscribeErrors: c.SubscribeErrors.Load(), CorrelationSamples: c.CorrelationSamples.Load(), Reconnects: c.Reconnects.Load(), Churned: c.Churned.Load(), ChurnReconnects: c.ChurnReconnects.Load(), Disconnects: c.Disconnects.Load(), Errors: map[string]uint64{}}
 	s.ConnectCancelled = c.ConnectCancelled.Load()
 	s.PublishCancelled = c.PublishCancelled.Load()
 	s.PublishSlotsMissed = c.PublishSlotsMissed.Load()
@@ -399,6 +403,8 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 		out.SubscribeErrors += s.SubscribeErrors
 		out.CorrelationSamples += s.CorrelationSamples
 		out.Reconnects += s.Reconnects
+		out.Churned += s.Churned
+		out.ChurnReconnects += s.ChurnReconnects
 		out.Disconnects += s.Disconnects
 		out.PublishSlotsMissed += s.PublishSlotsMissed
 		out.CorrelationRejected += s.CorrelationRejected

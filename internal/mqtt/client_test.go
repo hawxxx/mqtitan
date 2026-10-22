@@ -276,3 +276,60 @@ func TestPacketTimeoutCoversConfiguredTimeouts(t *testing.T) {
 		t.Fatalf("default packetTimeout = %s, want 10s", got)
 	}
 }
+
+type disconnectHook struct {
+	broker.HookBase
+	got chan error
+}
+
+func (h *disconnectHook) ID() string { return "disconnect-capture" }
+func (h *disconnectHook) Provides(b byte) bool {
+	return b == broker.OnDisconnect
+}
+func (h *disconnectHook) OnDisconnect(_ *broker.Client, err error, _ bool) {
+	select {
+	case h.got <- err:
+	default:
+	}
+}
+
+func TestDisconnectSendsMQTTDisconnect(t *testing.T) {
+	for _, v := range []string{"3.1.1", "5"} {
+		for _, graceful := range []bool{true, false} {
+			t.Run(v+map[bool]string{true: "/disconnect", false: "/close"}[graceful], func(t *testing.T) {
+				b := broker.New(&broker.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+				_ = b.AddHook(new(auth.AllowHook), nil)
+				hook := &disconnectHook{got: make(chan error, 4)}
+				_ = b.AddHook(hook, nil)
+				l := listeners.NewTCP(listeners.Config{ID: "tcp", Address: "127.0.0.1:0"})
+				if err := b.AddListener(l); err != nil {
+					t.Fatal(err)
+				}
+				_ = b.Serve()
+				defer b.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				c, err := Connect(ctx, scenario.Broker{URL: "mqtt://" + l.Address(), Version: v, CleanStart: true}, "dc-test", func([]byte) {})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if graceful {
+					c.Disconnect()
+				} else {
+					c.Close()
+				}
+				select {
+				case got := <-hook.got:
+					if graceful && got != nil {
+						t.Fatalf("Disconnect() surfaced as error %v", got)
+					}
+					if !graceful && got == nil {
+						t.Fatal("Close() unexpectedly sent a clean DISCONNECT")
+					}
+				case <-ctx.Done():
+					t.Fatal("broker saw no disconnect")
+				}
+			})
+		}
+	}
+}

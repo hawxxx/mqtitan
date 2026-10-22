@@ -5,7 +5,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/healthz`, `/readyz` | Process probes, not broker capacity certification |
-| GET | `/metrics` | Prometheus aggregates, including `emqxload_connect_failures_total{stage}` and `emqxload_connack_refusals_total{code}` |
+| GET | `/metrics` | Prometheus aggregates, including `emqxload_connect_failures_total{stage}` and `emqxload_connack_refusals_total{code}`, `emqxload_churned_total` and `emqxload_churn_reconnects_total` |
 | POST / GET | `/api/v1/tests` | Start / list tests |
 | GET | `/api/v1/tests/{id}` | Status and metadata |
 | POST | `/api/v1/tests/{id}/stop` | Request cancellation |

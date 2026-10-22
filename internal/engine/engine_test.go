@@ -583,3 +583,114 @@ func TestRefusedConnectLeavesNoActiveRemote(t *testing.T) {
 		t.Fatalf("failed connects recorded remotes: %+v", got.RemoteAddresses)
 	}
 }
+
+func lifetimeScenario(url string, life time.Duration, d time.Duration) scenario.Scenario {
+	s := baseScenario(url, "5")
+	s.Clients.Count = 1
+	s.Clients.Lifetime = &scenario.Lifetime{Min: scenario.Duration{Duration: life}, Max: scenario.Duration{Duration: life}}
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: d}, TargetClients: 1}}
+	return s
+}
+
+func TestLifetimeChurnReconnects(t *testing.T) {
+	s := lifetimeScenario(testBroker(t), 50*time.Millisecond, 230*time.Millisecond)
+	s.Broker.Reconnect = scenario.Reconnect{Enabled: false}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	diff := int64(got.Churned) - int64(got.ChurnReconnects)
+	if got.Churned < 3 || diff < 0 || diff > 1 || got.Reconnects != 0 || got.Errors["disconnect"] != 0 {
+		t.Fatalf("churn counters %+v", got)
+	}
+}
+
+func TestLifetimeDoesNotConsumeRetryBudget(t *testing.T) {
+	s := lifetimeScenario(testBroker(t), 20*time.Millisecond, time.Hour)
+	s.Broker.Reconnect = scenario.Reconnect{Enabled: true, MaxAttempts: 1, InitialBackoff: scenario.Duration{Duration: time.Second}, MaxBackoff: scenario.Duration{Duration: time.Second}}
+	m := metrics.New()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	e := Engine{Scenario: s, Metrics: m}
+	go func() { done <- e.Run(ctx) }()
+	time.Sleep(200 * time.Millisecond)
+	before := m.Churned.Load()
+	time.Sleep(100 * time.Millisecond)
+	after := m.Churned.Load()
+	cancel()
+	<-done
+	if before < 3 || after <= before {
+		t.Fatalf("client stopped churning: before=%d after=%d %+v", before, after, m.Snapshot())
+	}
+	if m.Snapshot().Errors["disconnect"] != 0 {
+		t.Fatalf("churn recorded a disconnect error: %+v", m.Snapshot())
+	}
+}
+
+func TestLifetimeSpread(t *testing.T) {
+	s := baseScenario("mqtt://127.0.0.1:1", "5")
+	s.Seed = 42
+	s.Clients.Lifetime = &scenario.Lifetime{Min: scenario.Duration{Duration: time.Second}, Max: scenario.Duration{Duration: 2 * time.Second}}
+	e := Engine{Scenario: s}
+	seen := map[time.Duration]bool{}
+	for seq := 1; seq <= 200; seq++ {
+		d := e.lifetimeFor(seq, 0)
+		if d < time.Second || d > 2*time.Second {
+			t.Fatalf("lifetime %v outside [1s,2s]", d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("lifetimes are all equal")
+	}
+	if e.lifetimeFor(7, 3) != e.lifetimeFor(7, 3) {
+		t.Fatal("lifetime is not deterministic")
+	}
+}
+
+func TestFailureAfterChurnCountsAsReconnect(t *testing.T) {
+	b := broker.New(&broker.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	_ = b.AddHook(new(auth.AllowHook), nil)
+	l := listeners.NewTCP(listeners.Config{ID: "tcp", Address: "127.0.0.1:0"})
+	if err := b.AddListener(l); err != nil {
+		t.Fatal(err)
+	}
+	_ = b.Serve()
+	defer b.Close()
+	s := lifetimeScenario("mqtt://"+l.Address(), 300*time.Millisecond, time.Hour)
+	s.Broker.Reconnect = scenario.Reconnect{Enabled: true, MaxAttempts: 3, InitialBackoff: scenario.Duration{Duration: time.Millisecond}, MaxBackoff: scenario.Duration{Duration: 2 * time.Millisecond}}
+	m := metrics.New()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	e := Engine{Scenario: s, Metrics: m}
+	go func() { done <- e.Run(ctx) }()
+	for m.ChurnReconnects.Load() < 1 || m.Connected.Load() != 1 {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("no churn reconnect: %+v", m.Snapshot())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	churnReconnects := m.ChurnReconnects.Load()
+	cl, ok := b.Clients.Get("wire-1")
+	if !ok {
+		t.Fatal("broker lacks client")
+	}
+	_ = cl.Net.Conn.Close()
+	for m.Reconnects.Load() < 1 {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("failure not counted as reconnect: %+v", m.Snapshot())
+		case <-time.After(time.Millisecond):
+		}
+	}
+	if got := m.ChurnReconnects.Load(); got != churnReconnects {
+		t.Fatalf("failure reconnect counted as churn: %d -> %d", churnReconnects, got)
+	}
+	cancel()
+	<-done
+}

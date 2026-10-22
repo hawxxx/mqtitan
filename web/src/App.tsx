@@ -1540,6 +1540,8 @@ function TestDetail({ id }: { id: string }) {
                 ["Connecting", s.connecting],
                 ["Errors", s.connectErrors],
                 ["Reconnects", s.reconnects || 0],
+                ["Churned", s.churned || 0],
+                ["Churn reconnects", s.churnReconnects || 0],
                 ["Subscriptions", s.subscriptions || 0],
               ].map(([k, v]) => (
                 <div className="plan-row" key={k}>

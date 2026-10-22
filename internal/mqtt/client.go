@@ -25,6 +25,8 @@ type Client interface {
 	Publish(context.Context, string, byte, bool, []byte) error
 	Subscribe(context.Context, string, byte) error
 	Close()
+	// Disconnect sends an MQTT DISCONNECT, then closes like Close.
+	Disconnect()
 	Done() <-chan struct{}
 	// RemoteAddr is the unmapped broker address the connection was made to.
 	RemoteAddr() netip.AddrPort
@@ -285,6 +287,13 @@ func (c *client3) closeConn() {
 // Paho reports connection loss after its network and routing workers have joined.
 func (c *client3) Close()                { c.closeConn(); <-c.done }
 func (c *client3) Done() <-chan struct{} { return c.done }
+func (c *client3) Disconnect() {
+	// A clean disconnect does not invoke the connection-lost handler, so
+	// release Done ourselves once paho has joined its workers.
+	c.c.Disconnect(250)
+	c.closeConn()
+	c.once.Do(func() { close(c.done) })
+}
 func (c *client3) RemoteAddr() netip.AddrPort {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -357,6 +366,10 @@ func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 func (c *client5) Close()                     { _ = c.conn.Close(); <-c.c.Done() }
 func (c *client5) Done() <-chan struct{}      { return c.c.Done() }
 func (c *client5) RemoteAddr() netip.AddrPort { return c.remote }
+func (c *client5) Disconnect() {
+	_ = c.c.Disconnect(&paho.Disconnect{ReasonCode: 0})
+	c.Close()
+}
 func (c *client5) Publish(ctx context.Context, topic string, qos byte, retain bool, data []byte) error {
 	stop := context.AfterFunc(ctx, func() { _ = c.conn.Close() })
 	defer stop()
