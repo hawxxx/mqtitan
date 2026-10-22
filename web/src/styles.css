@@ -800,6 +800,18 @@ tbody tr:hover {
 .badge.warn i {
   background: var(--amber);
 }
+/* Neutral states (info, disabled, pending) get a muted dot, not success teal. */
+.badge i {
+  background: var(--muted);
+}
+.badge.running i,
+.badge.active i,
+.badge.online i,
+.badge.passed i,
+.badge.ok i,
+.badge.completed i {
+  background: var(--teal);
+}
 .help-strip {
   display: flex;
   gap: 13px;
@@ -1192,9 +1204,6 @@ textarea:focus {
   background: var(--bg);
   color: var(--text);
 }
-[data-theme="light"] .badge {
-  color: #34755c;
-}
 [data-theme="light"] .editor textarea,
 [data-theme="light"] .yaml-read {
   color: #226e5b;
@@ -1217,6 +1226,7 @@ textarea:focus {
 [data-theme="light"] .badge.ok,
 [data-theme="light"] .badge.passed,
 [data-theme="light"] .badge.active {
+  color: #34755c;
   background: #e0f3e9;
   border-color: #b7d9c7;
 }

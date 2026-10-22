@@ -38,6 +38,8 @@ export function NumberTicker({
       const t = Math.min(1, (performance.now() - start) / duration);
       const eased = 1 - Math.pow(1 - t, 3);
       shown.current = from + (value - from) * eased;
+      // Counts must not flash fractions such as "42,586.6" mid-animation.
+      if (Number.isInteger(value)) shown.current = Math.round(shown.current);
       el.textContent = formatRef.current(t === 1 ? value : shown.current);
       if (t < 1) frame = requestAnimationFrame(step);
     });

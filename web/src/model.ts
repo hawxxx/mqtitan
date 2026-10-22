@@ -263,7 +263,7 @@ export const bytes = (n: number) => {
       ? `${(n / 1048576).toFixed(1)} MB`
       : size >= 1024
         ? `${(n / 1024).toFixed(1)} KB`
-        : `${n || 0} B`;
+        : `${Math.round(n || 0)} B`;
 };
 // Elapsed seconds as m:ss or h:mm:ss for chart axes and run durations.
 export const elapsed = (seconds: number) => {

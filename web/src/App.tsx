@@ -109,15 +109,17 @@ function Empty({
   title,
   detail,
   action,
+  icon: Icon = Activity,
 }: {
   title: string;
   detail: string;
   action?: ReactNode;
+  icon?: typeof Activity;
 }) {
   return (
     <div className="empty">
       <div className="empty-mark">
-        <Activity size={30} />
+        <Icon size={30} />
       </div>
       <h3>{title}</h3>
       <p>{detail}</p>
@@ -307,7 +309,12 @@ function Chart({
             stroke: "#7f949c",
             grid: { stroke: "rgba(127,148,156,.1)" },
             font: "11px monospace",
-            size: 72,
+            // Fit the widest tick label so "78.1 KB/s" is not clipped.
+            size: (_u, values) =>
+              Math.max(
+                56,
+                Math.max(0, ...(values || []).map((v) => v.length)) * 7 + 22,
+              ),
             // Axis ticks are round numbers; drop the ".00" the readout keeps.
             values: (_u, ticks) =>
               ticks.map((v) => format(v).replace(/\.0+(?= )/, "")),
@@ -1650,7 +1657,8 @@ function TestDetail({ id }: { id: string }) {
             </table>
           ) : (
             <Empty
-              title="No thresholds configured"
+              icon={Gauge}
+            title="No thresholds configured"
               detail="Add thresholds to your scenario to evaluate pass or fail criteria."
             />
           )}
@@ -1748,7 +1756,7 @@ function TestDetail({ id }: { id: string }) {
 const chartInfo = {
   messageRate: ["Message throughput", "Messages / second"],
   connected: ["Connected clients", "Clients"],
-  p95: ["Publish latency · P95", "Milliseconds"],
+  p95: ["Publish latency · P95", "Latency"],
   byteRate: ["Bandwidth", "Bytes / second"],
 } as const;
 function ChartPanel({
@@ -1829,7 +1837,8 @@ export function BrokerTelemetry() {
         <div className="loading">Loading broker observations…</div>
       ) : !data?.configured ? (
         <Empty
-          title="EMQX monitoring is not configured"
+          icon={Radio}
+            title="EMQX monitoring is not configured"
           detail="Set the server's EMQX management API URL and API credentials to observe broker-side metrics."
         />
       ) : (
@@ -1990,7 +1999,8 @@ export function Brokers() {
             ))
           ) : (
             <Empty
-              title="No broker profiles"
+              icon={Database}
+            title="No broker profiles"
               detail="Save a connection to select it in the test wizard."
             />
           )}
@@ -2213,6 +2223,7 @@ export function Workers() {
       {!workers.isLoading && !workers.data?.length && !workers.error && (
         <section className="panel">
           <Empty
+            icon={Server}
             title="No workers connected"
             detail="Start the server with a local worker or connect a remote generator."
           />
@@ -2240,7 +2251,7 @@ export function Workers() {
               {doctor.data?.map((c) => (
                 <tr key={c.Name}>
                   <td>{c.Name}</td>
-                  <td className="mono">{c.Value}</td>
+                  <td className="mono">{readinessValue(c.Value)}</td>
                   <td>
                     <Badge status={c.Status} />
                   </td>
@@ -2254,6 +2265,11 @@ export function Workers() {
     </>
   );
 }
+// Doctor reports raw byte counts; show them in readable units.
+const readinessValue = (value: string) => {
+  const raw = /^(\d+) bytes$/.exec(value);
+  return raw ? bytes(Number(raw[1])) : value;
+};
 const compareLabels: Record<string, string> = {
   peakConnected: "Peak connected",
   published: "Messages published",
@@ -2379,6 +2395,7 @@ function Compare() {
       ) : (
         <section className="panel">
           <Empty
+            icon={GitCompareArrows}
             title="Choose two runs to compare"
             detail="Pick a baseline and a candidate to see differences in throughput, latency, and reliability."
           />
@@ -2452,6 +2469,7 @@ function Errors() {
           ))
         ) : (
           <Empty
+            icon={CheckCircle2}
             title="No recorded errors"
             detail="Run diagnostics will appear here when the engine reports a failure."
           />
