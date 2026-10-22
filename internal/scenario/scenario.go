@@ -43,6 +43,7 @@ type Scenario struct {
 	Thresholds          map[string]string `yaml:"thresholds,omitempty"`
 	SharedCorrelationID string            `yaml:"correlationRunId,omitempty"`
 	Safety              Safety            `yaml:"safety,omitempty"`
+	Telemetry           *Telemetry        `yaml:"telemetry,omitempty"`
 }
 
 type Broker struct {
@@ -337,6 +338,9 @@ func (s Scenario) Validate() error {
 		problems = append(problems, "workload populations exceed clients.count")
 	}
 	problems = append(problems, s.Safety.check(s)...)
+	if s.Telemetry != nil {
+		problems = append(problems, s.Telemetry.check()...)
+	}
 	if len(problems) == 0 && s.needsRenderCheck() {
 		if err := s.CheckRendered(s.Clients.Worker, s.Clients.SequenceOffset, s.Clients.SequenceOffset+s.Clients.Count); err != nil {
 			problems = append(problems, err.Error())
@@ -444,4 +448,92 @@ func ParseAddressPrefix(cidr string) (netip.Prefix, error) {
 		return netip.Prefix{}, fmt.Errorf("must be an IPv4 or IPv6 prefix, not IPv4-mapped (use %s)", "an IPv4 CIDR such as 198.51.100.0/24")
 	}
 	return p.Masked(), nil
+}
+
+// Telemetry configures controller-side broker telemetry polled during a test.
+// Exactly one source (emqx or prometheus) must be set. Credentials come from
+// controller environment variables, never from YAML.
+type Telemetry struct {
+	Interval        Duration          `yaml:"interval,omitempty"`        // default 15s, min 5s
+	ExpectedTargets int               `yaml:"expectedTargets,omitempty"` // 0 = no check
+	Baseline        string            `yaml:"baseline,omitempty"`        // "", "none", "first"
+	EMQX            []EMQXTarget      `yaml:"emqx,omitempty"`
+	Prometheus      *PrometheusSource `yaml:"prometheus,omitempty"`
+}
+type EMQXTarget struct {
+	Name string `yaml:"name"`
+	Zone string `yaml:"zone,omitempty"`
+	URL  string `yaml:"url"`
+}
+type PrometheusSource struct {
+	URL         string `yaml:"url"`
+	Query       string `yaml:"query"`
+	TargetLabel string `yaml:"targetLabel,omitempty"` // default "pod"
+	ZoneLabel   string `yaml:"zoneLabel,omitempty"`   // default "zone"
+}
+
+const (
+	DefaultTelemetryInterval = 15 * time.Second
+	MinTelemetryInterval     = 5 * time.Second
+	MaxTelemetryTargets      = 1024
+	MaxExpectedTargets       = 4096
+)
+
+// PollInterval returns the configured interval or the default.
+func (t Telemetry) PollInterval() time.Duration {
+	if t.Interval.Duration <= 0 {
+		return DefaultTelemetryInterval
+	}
+	return t.Interval.Duration
+}
+
+func (t Telemetry) check() []string {
+	var problems []string
+	if t.Interval.Duration != 0 && t.Interval.Duration < MinTelemetryInterval {
+		problems = append(problems, "telemetry.interval must be at least 5s")
+	}
+	if t.ExpectedTargets < 0 || t.ExpectedTargets > MaxExpectedTargets {
+		problems = append(problems, "telemetry.expectedTargets must be between 0 and 4096")
+	}
+	switch t.Baseline {
+	case "", "none", "first":
+	default:
+		problems = append(problems, "telemetry.baseline must be none or first")
+	}
+	hasEMQX, hasProm := len(t.EMQX) > 0, t.Prometheus != nil
+	if hasEMQX == hasProm {
+		problems = append(problems, "telemetry must set exactly one of emqx or prometheus")
+	}
+	checkURL := func(field, raw string) {
+		u, err := url.Parse(raw)
+		switch {
+		case raw == "":
+			problems = append(problems, field+" is required")
+		case err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https"):
+			problems = append(problems, field+" must be an http or https URL")
+		case u.User != nil:
+			problems = append(problems, field+": credentials must not be in YAML")
+		}
+	}
+	if len(t.EMQX) > MaxTelemetryTargets {
+		problems = append(problems, "telemetry.emqx allows at most 1024 targets")
+	} else {
+		seen := map[string]bool{}
+		for i, e := range t.EMQX {
+			if e.Name == "" {
+				problems = append(problems, fmt.Sprintf("telemetry.emqx[%d].name is required", i))
+			} else if seen[e.Name] {
+				problems = append(problems, fmt.Sprintf("telemetry.emqx[%d].name duplicates an earlier entry", i))
+			}
+			seen[e.Name] = true
+			checkURL(fmt.Sprintf("telemetry.emqx[%d].url", i), e.URL)
+		}
+	}
+	if p := t.Prometheus; p != nil {
+		checkURL("telemetry.prometheus.url", p.URL)
+		if p.Query == "" {
+			problems = append(problems, "telemetry.prometheus.query is required")
+		}
+	}
+	return problems
 }

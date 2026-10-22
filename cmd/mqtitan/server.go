@@ -87,6 +87,7 @@ func openServer(o runOptions) (*localServer, error) {
 	if base := os.Getenv("MQTITAN_EMQX_URL"); base != "" {
 		m.ConfigureEMQX(&emqx.Client{BaseURL: base, APIKey: os.Getenv("MQTITAN_EMQX_API_KEY"), APISecret: os.Getenv("MQTITAN_EMQX_API_SECRET")})
 	}
+	m.SetCredentials(emqx.Credentials{APIKey: os.Getenv("MQTITAN_EMQX_API_KEY"), APISecret: os.Getenv("MQTITAN_EMQX_API_SECRET"), PromToken: os.Getenv("MQTITAN_PROMETHEUS_TOKEN"), PromUser: os.Getenv("MQTITAN_PROMETHEUS_USERNAME"), PromPassword: os.Getenv("MQTITAN_PROMETHEUS_PASSWORD")})
 	listener, err := net.Listen("tcp", o.Listen)
 	if err != nil {
 		m.Close()

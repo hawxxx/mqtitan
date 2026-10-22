@@ -14,6 +14,7 @@ MQTTitan is an engineering preview. Deployment manifests and large scenarios are
 | Start a container stack | [Docker and Compose](docker.md) |
 | Run distributed load in a cluster | [Kubernetes with Helm](kubernetes.md) |
 | Collect broker-side metrics | [EMQX integration](emqx.md) |
+| Prove broker balance | [Per-test telemetry](emqx.md#per-test-telemetry) |
 | Automate through HTTP | [REST API](api.md) |
 | Diagnose failures | [Troubleshooting](troubleshooting.md) |
 | Understand implementation and limits | [Architecture](architecture/overview.md), [diagrams](architecture/diagrams.md), [roadmap](roadmap.md) |

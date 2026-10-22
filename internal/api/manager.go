@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/emqx"
 	"github.com/mqtitan/mqtitan/internal/engine"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/scenario"
@@ -37,6 +38,9 @@ type Test struct {
 	WorkerIDs    []string            `json:"workerIds"`
 	LostWorkers  []string            `json:"lostWorkers,omitempty"`
 	SourceTestID string              `json:"sourceTestId,omitempty"`
+	// Brokers holds persisted telemetry samples. publicTest strips it; read it
+	// through Manager.Brokers.
+	Brokers []emqx.FleetSample `json:"brokers,omitempty"`
 }
 type Sample struct {
 	Timestamp   time.Time        `json:"timestamp"`
@@ -66,6 +70,8 @@ type execution struct {
 	// Guarded by the worker registry lock.
 	peakConnected int64
 	lostWorkers   []string
+	// Guarded by Manager.mu.
+	brokers []emqx.FleetSample
 }
 type Manager struct {
 	store   *storage.Store
@@ -77,6 +83,9 @@ type Manager struct {
 	closed  bool
 	workers *workerRegistry
 	broker  BrokerTelemetry
+	creds   emqx.Credentials
+	// telemetryEvery overrides the scenario poll interval; tests only.
+	telemetryEvery time.Duration
 }
 
 func NewManager(store *storage.Store) (*Manager, error) {
@@ -203,6 +212,10 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 	ctx, span := otel.Tracer("mqtitan/controller").Start(ctx, "scenario.execute")
 	defer span.End()
 	defer m.wg.Done()
+	stopTelemetry := func() {}
+	if s.Telemetry != nil {
+		stopTelemetry = m.startTelemetry(ctx, r, *s.Telemetry)
+	}
 	done := make(chan error, 1)
 	e := engine.Engine{Scenario: s, Metrics: r.counters, Control: r.control}
 	go func() {
@@ -249,6 +262,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			record()
 		case err := <-done:
 			record()
+			stopTelemetry()
 			now := time.Now().UTC()
 			results, thresholdErr := thresholds.Evaluate(s.Thresholds, r.snapshot())
 			m.mu.Lock()
@@ -259,6 +273,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 				m.workers.mu.Unlock()
 			}
 			r.test.Thresholds = results
+			r.test.Brokers = append([]emqx.FleetSample(nil), r.brokers...)
 			r.test.Status = "completed"
 			if ctx.Err() != nil {
 				r.test.Status = "stopped"
@@ -442,7 +457,7 @@ func (m *Manager) Scenarios() ([]SavedScenario, error) {
 	}
 	return out, nil
 }
-func publicTest(t Test) Test { t.Scenario = redact(t.Scenario); return t }
+func publicTest(t Test) Test { t.Scenario = redact(t.Scenario); t.Brokers = nil; return t }
 func redact(raw string) string {
 	var node yaml.Node
 	if err := yaml.Unmarshal([]byte(raw), &node); err != nil {

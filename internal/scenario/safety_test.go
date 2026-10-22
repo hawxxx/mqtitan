@@ -1,6 +1,7 @@
 package scenario
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -254,5 +255,46 @@ func TestForbiddenPrefixMustBeLiteral(t *testing.T) {
 		if err := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{p}}, "c-${sequence}").Validate(); err != nil {
 			t.Errorf("%q: %v", p, err)
 		}
+	}
+}
+
+func TestTelemetryValidation(t *testing.T) {
+	emqx := []EMQXTarget{{Name: "a", Zone: "z1", URL: "http://198.51.100.1:18083"}}
+	prom := &PrometheusSource{URL: "http://prometheus.example.net:9090", Query: "up"}
+	cases := []struct {
+		name string
+		tel  Telemetry
+		want string
+	}{
+		{"ok emqx", Telemetry{EMQX: emqx}, ""},
+		{"ok prometheus", Telemetry{Prometheus: prom, Baseline: "first", ExpectedTargets: 4096, Interval: Duration{5 * time.Second}}, ""},
+		{"no sources", Telemetry{}, "telemetry must set exactly one of emqx or prometheus"},
+		{"both", Telemetry{EMQX: emqx, Prometheus: prom}, "telemetry must set exactly one of emqx or prometheus"},
+		{"userinfo", Telemetry{EMQX: []EMQXTarget{{Name: "a", URL: "http://u:p@host"}}}, "credentials must not be in YAML"},
+		{"prom userinfo", Telemetry{Prometheus: &PrometheusSource{URL: "http://u:p@host", Query: "up"}}, "credentials must not be in YAML"},
+		{"interval", Telemetry{EMQX: emqx, Interval: Duration{time.Second}}, "telemetry.interval must be at least 5s"},
+		{"duplicate", Telemetry{EMQX: append(append([]EMQXTarget{}, emqx...), emqx...)}, "duplicates"},
+		{"negative expected", Telemetry{EMQX: emqx, ExpectedTargets: -1}, "telemetry.expectedTargets must be between 0 and 4096"},
+		{"large expected", Telemetry{EMQX: emqx, ExpectedTargets: 5000}, "telemetry.expectedTargets must be between 0 and 4096"},
+		{"baseline", Telemetry{EMQX: emqx, Baseline: "last"}, "telemetry.baseline must be none or first"},
+		{"empty query", Telemetry{Prometheus: &PrometheusSource{URL: "http://h"}}, "telemetry.prometheus.query is required"},
+	}
+	for _, tc := range cases {
+		s := safetyScenario(Safety{}, "c-${sequence}")
+		tel := tc.tel
+		s.Telemetry = &tel
+		err := s.Validate()
+		if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: got %v want %q", tc.name, err, tc.want)
+		}
+	}
+	many := make([]EMQXTarget, 1025)
+	for i := range many {
+		many[i] = EMQXTarget{Name: fmt.Sprint("n", i), URL: "http://h"}
+	}
+	s := safetyScenario(Safety{}, "c-${sequence}")
+	s.Telemetry = &Telemetry{EMQX: many}
+	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "at most 1024") {
+		t.Errorf("many: %v", err)
 	}
 }

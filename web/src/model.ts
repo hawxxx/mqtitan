@@ -83,6 +83,21 @@ export interface Test {
     revision: number;
   }[];
 }
+export interface TargetSample {
+  Target: string;
+  Zone: string;
+  Connections: number;
+  Raw: number;
+  Error?: string;
+}
+export interface FleetSample {
+  Timestamp: string;
+  Source: "emqx" | "prometheus";
+  Targets: TargetSample[];
+  Complete: boolean;
+  Baseline: boolean;
+  Error?: string;
+}
 export interface Sample {
   timestamp: string;
   snapshot: Snapshot;

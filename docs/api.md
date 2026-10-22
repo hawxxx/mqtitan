@@ -13,6 +13,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | POST | `/api/v1/tests/{id}/load` | Apply [live controls](live-controls.md) |
 | GET | `/api/v1/tests/{id}/metrics` | Aggregate history |
 | GET | `/api/v1/tests/{id}/stream` | Live SSE |
+| GET | `/api/v1/tests/{id}/brokers` | Per-test broker telemetry samples (see [EMQX integration](emqx.md#per-test-telemetry)) |
 | GET | `/api/v1/tests/{id}/export?format=json` | JSON report; `format=csv` also supported (columns: timestamp, connected, published, messages_per_second, bytes_per_second, p50_ms, p95_ms, p99_ms, connection_errors, publish_errors, received, end_to_end_p95_ms, subscribe_errors, connect_failures) |
 | POST / GET | `/api/v1/scenarios` | Save / list scenarios |
 | POST | `/api/v1/plan` | Validate and estimate a scenario |
@@ -44,7 +45,7 @@ curl --fail-with-body -sS \
 curl -N http://127.0.0.1:8080/api/v1/tests/TEST_ID/stream
 ```
 
-SSE types are `status`, `metrics`, and `heartbeat`. Slow consumers can skip snapshots; there is no `Last-Event-ID` replay. Fetch state/history after reconnecting. Lists return at most 1,000 records and metrics retrieval at most 3,600 samples. JSON export contains `data.test` and `data.samples`. Go duration fields serialize as nanoseconds unless a dedicated display field is used.
+SSE types are `status`, `metrics`, `broker` and `heartbeat`. A `broker` event carries one telemetry sample (`Timestamp`, `Source`, `Targets[]`, `Complete`, `Baseline`, optional `Error`) and is sent only for scenarios with a `telemetry` block. Slow consumers can skip snapshots; there is no `Last-Event-ID` replay. Fetch state/history after reconnecting. Lists return at most 1,000 records and metrics retrieval at most 3,600 samples. JSON export contains `data.test` and `data.samples`. Go duration fields serialize as nanoseconds unless a dedicated display field is used.
 
 ## Connect failure breakdown
 

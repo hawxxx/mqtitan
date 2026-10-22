@@ -68,6 +68,7 @@ import {
   number,
   request,
   type Check,
+  type FleetSample,
   type Sample,
   type SavedScenario,
   type Test,
@@ -1241,6 +1242,10 @@ function useStream(id: string, running: boolean) {
               if (event === "metrics")
                 qc.setQueryData<Sample[]>(["metrics", id], (old) =>
                   [...(old || []), v].slice(-10000),
+                );
+              if (event === "broker")
+                qc.setQueryData<FleetSample[]>(["brokers", id], (old) =>
+                  [...(old || []), v].slice(-2880),
                 );
               if (event === "status") {
                 qc.setQueryData(["test", id], v);
