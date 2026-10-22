@@ -39,7 +39,6 @@ import {
   FileCode2,
   Gauge,
   GitCompareArrows,
-  Layers,
   LayoutDashboard,
   Play,
   Plus,
@@ -2201,11 +2200,14 @@ function Shell() {
       </a>
       <aside className="sidebar">
         <Link to="/" className="brand">
-          <div className="brand-symbol">
-            <Layers size={25} />
-          </div>
+          <img className="brand-symbol" src="/emblem.png" alt="" />
           <span>
-            MQ<span className="brand-accent">Titan</span>
+            <span className="wordmark" aria-label="MQTiTan">
+              <span>MQT</span>
+              <span className="silver">i</span>
+              <span>T</span>
+              <span className="silver">an</span>
+            </span>
             <small>PERFORMANCE LAB</small>
           </span>
         </Link>
@@ -2296,7 +2298,7 @@ function Shell() {
         </main>
         <footer>
           <span>
-            MQTitan <span className="subdued">/ Engineered for scale.</span>
+            MQTiTan <span className="subdued">/ Engineered for scale.</span>
           </span>
           <span className="mono">MQTT 3.1.1 · MQTT 5.0</span>
         </footer>
@@ -2337,7 +2339,7 @@ function PageContent({
     const page = path.startsWith("/tests/")
       ? "Test"
       : nav.find(([, to]) => to === path)?.[0] || "Dashboard";
-    document.title = `${page} · MQTitan`;
+    document.title = `${page} · MQTiTan`;
   }, [path]);
   if (path.startsWith("/tests/") && path.split("/")[2])
     return <TestDetail id={decodeURIComponent(path.split("/")[2])} />;

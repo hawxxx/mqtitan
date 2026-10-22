@@ -129,7 +129,7 @@ func serve(args []string) error {
 		return err
 	}
 	defer l.Close()
-	fmt.Printf("MQTTitan controller: http://%s\n", l.address)
+	fmt.Printf("MQTiTan controller: http://%s\n", l.address)
 	ctx, cancel := signalContext()
 	defer cancel()
 	select {
