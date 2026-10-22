@@ -4,6 +4,7 @@ import (
 	"errors"
 	hdr "github.com/HdrHistogram/hdrhistogram-go"
 	"math"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -74,7 +75,16 @@ type Counters struct {
 	nextShard           atomic.Uint64
 	shards              [shardCount]latencyShard
 	errors              [len(errorCategories)]atomic.Uint64
+	connectFailures     [len(connectStages)]atomic.Uint64
+	connackReasons      [256]atomic.Uint64
 }
+
+// connectStages mirrors the stage constants in internal/mqtt; the last entry
+// ("other") absorbs unknown stages so the stage counts always sum to ConnectErrors.
+var connectStages = [...]string{"dns", "tcp", "tls_handshake", "tls_verify_chain", "tls_verify_hostname", "tls_alert", "websocket_upgrade", "mqtt_connack", "timeout", "other"}
+
+// ConnectStages returns the bounded connect failure stages in stable order.
+func ConnectStages() []string { return connectStages[:] }
 
 // errorCategories are the bounded error classes; "timeout" is an operation
 // that exceeded operationTimeout, which the client then closed itself.
@@ -98,6 +108,22 @@ func (c *Counters) RecordError(category string) {
 		}
 	}
 	c.errors[i].Add(1)
+}
+
+// RecordConnectFailure counts one classified connect failure; code is the
+// CONNACK code for mqtt_connack and negative otherwise. It does not allocate.
+func (c *Counters) RecordConnectFailure(stage string, code int) {
+	i := len(connectStages) - 1
+	for j, name := range connectStages {
+		if name == stage {
+			i = j
+			break
+		}
+	}
+	c.connectFailures[i].Add(1)
+	if code >= 0 && code < len(c.connackReasons) {
+		c.connackReasons[code].Add(1)
+	}
 }
 func (c *Counters) record(shard int, kind byte, d time.Duration) {
 	c.recordCorrected(shard, kind, d, 0)
@@ -189,6 +215,8 @@ type Snapshot struct {
 	PublishSlotsMissed  uint64            `json:"publishSlotsMissed"`
 	CorrelationRejected uint64            `json:"correlationRejected"`
 	Errors              map[string]uint64 `json:"errors,omitempty"`
+	ConnectFailures     map[string]uint64 `json:"connectFailures,omitempty"`
+	ConnackReasons      map[string]uint64 `json:"connackReasons,omitempty"`
 	ConnectP50          time.Duration     `json:"connectP50"`
 	ConnectP95          time.Duration     `json:"connectP95"`
 	ConnectP99          time.Duration     `json:"connectP99"`
@@ -222,6 +250,22 @@ func (c *Counters) Snapshot() Snapshot {
 	for i, name := range errorCategories {
 		if n := c.errors[i].Load(); n > 0 {
 			s.Errors[name] = n
+		}
+	}
+	for i, name := range connectStages {
+		if n := c.connectFailures[i].Load(); n > 0 {
+			if s.ConnectFailures == nil {
+				s.ConnectFailures = map[string]uint64{}
+			}
+			s.ConnectFailures[name] = n
+		}
+	}
+	for code := range c.connackReasons {
+		if n := c.connackReasons[code].Load(); n > 0 {
+			if s.ConnackReasons == nil {
+				s.ConnackReasons = map[string]uint64{}
+			}
+			s.ConnackReasons[strconv.Itoa(code)] = n
 		}
 	}
 	p, e, k, summary := c.merged()
@@ -359,6 +403,8 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 				out.Errors[name] += n
 			}
 		}
+		out.ConnectFailures = mergeCounts(out.ConnectFailures, s.ConnectFailures)
+		out.ConnackReasons = mergeCounts(out.ConnackReasons, s.ConnackReasons)
 	}
 	p, e, k := histogram(), histogram(), histogram()
 	for _, d := range distributions {
@@ -380,4 +426,18 @@ func MergeSnapshots(snapshots []Snapshot, distributions []Distribution) Snapshot
 		out.Avg = time.Duration(int64(out.PublishLatencySum) / int64(out.PublishLatencyCount))
 	}
 	return out
+}
+
+// mergeCounts adds src into dst, allocating dst only when src has entries.
+func mergeCounts(dst, src map[string]uint64) map[string]uint64 {
+	for k, n := range src {
+		if n == 0 {
+			continue
+		}
+		if dst == nil {
+			dst = map[string]uint64{}
+		}
+		dst[k] += n
+	}
+	return dst
 }

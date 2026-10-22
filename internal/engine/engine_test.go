@@ -499,3 +499,25 @@ func TestPublishTimeoutIsSaturationNotBrokerDisconnect(t *testing.T) {
 		})
 	}
 }
+
+func TestEngineCountsConnectFailureStage(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := l.Addr().String()
+	_ = l.Close()
+	s := baseScenario("mqtt://"+addr, "5")
+	s.Clients.Count = 1
+	s.Workloads = []scenario.Workload{{Type: "connection", Clients: 1}}
+	s.Stages = []scenario.Stage{{Duration: scenario.Duration{Duration: 100 * time.Millisecond}, TargetClients: 1}}
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err = e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := m.Snapshot()
+	if got.ConnectErrors == 0 || got.ConnectFailures["tcp"] != got.ConnectErrors || len(got.ConnectFailures) != 1 {
+		t.Fatalf("connectErrors=%d connectFailures=%v", got.ConnectErrors, got.ConnectFailures)
+	}
+}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/metrics"
 	"net/http"
 	"runtime"
 	"sort"
@@ -21,6 +22,8 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 	var count uint64
 	sum := 0.0
 	buckets := map[time.Duration]uint64{}
+	stages := map[string]uint64{}
+	connack := map[int]uint64{}
 	for _, t := range tests {
 		s := t.Snapshot
 		if t.Status == "running" {
@@ -38,6 +41,14 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 		counters["publishes_cancelled_total"] += s.PublishCancelled
 		counters["publish_slots_missed_total"] += s.PublishSlotsMissed
 		counters["correlation_rejected_total"] += s.CorrelationRejected
+		for stage, n := range s.ConnectFailures {
+			stages[stage] += n
+		}
+		for code, n := range s.ConnackReasons {
+			if v, err := strconv.Atoi(code); err == nil {
+				connack[v] += n
+			}
+		}
 		count += s.PublishLatencyCount
 		sum += s.PublishLatencySum.Seconds()
 		for _, b := range s.Histogram {
@@ -52,6 +63,21 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 	sort.Strings(names)
 	for _, name := range names {
 		fmt.Fprintf(w, "# TYPE emqxload_%s counter\nemqxload_%s %d\n", name, name, counters[name])
+	}
+	fmt.Fprintln(w, "# TYPE emqxload_connect_failures_total counter")
+	for _, stage := range metrics.ConnectStages() {
+		fmt.Fprintf(w, "emqxload_connect_failures_total{stage=%q} %d\n", stage, stages[stage])
+	}
+	codes := make([]int, 0, len(connack))
+	for code := range connack {
+		codes = append(codes, code)
+	}
+	sort.Ints(codes)
+	if len(codes) > 0 {
+		fmt.Fprintln(w, "# TYPE emqxload_connack_refusals_total counter")
+	}
+	for _, code := range codes {
+		fmt.Fprintf(w, "emqxload_connack_refusals_total{code=\"%d\"} %d\n", code, connack[code])
 	}
 	fmt.Fprintln(w, "# TYPE emqxload_publish_latency_seconds histogram")
 	bounds := make([]time.Duration, 0, len(buckets))

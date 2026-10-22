@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/storage"
 	"net/http"
@@ -198,5 +199,64 @@ func TestPerSecondRejectsRegressionAndEmptyIntervals(t *testing.T) {
 	}
 	if got := perSecond(10, 5, 0); got != 0 {
 		t.Fatalf("zero interval rate = %v, want 0", got)
+	}
+}
+
+func TestPrometheusConnectFailureSeries(t *testing.T) {
+	m, h := setup(t)
+	for i, snap := range []metrics.Snapshot{
+		{ConnectErrors: 5, ConnectFailures: map[string]uint64{"tcp": 2, "mqtt_connack": 3}, ConnackReasons: map[string]uint64{"135": 2, "5": 1}},
+		{ConnectErrors: 2, ConnectFailures: map[string]uint64{"tcp": 1, "tls_alert": 1}, ConnackReasons: map[string]uint64{"135": 1}},
+	} {
+		if err := m.persist(Test{ID: fmt.Sprintf("failures-%d", i), Name: "f", Status: "completed", Snapshot: snap}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	body := w.Body.String()
+	for _, want := range []string{
+		`emqxload_connect_failures_total{stage="tcp"} 3`, `emqxload_connect_failures_total{stage="mqtt_connack"} 3`,
+		`emqxload_connect_failures_total{stage="tls_alert"} 1`, `emqxload_connect_failures_total{stage="dns"} 0`,
+		`emqxload_connect_failures_total{stage="other"} 0`,
+		`emqxload_connack_refusals_total{code="5"} 1`, `emqxload_connack_refusals_total{code="135"} 3`,
+	} {
+		if !strings.Contains(body, want+"\n") {
+			t.Fatalf("missing %s in\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `connack_refusals_total{code="0"}`) {
+		t.Fatal("zero code exported")
+	}
+	if strings.Index(body, `stage="dns"`) > strings.Index(body, `stage="tcp"`) {
+		t.Fatal("stages not in stable order")
+	}
+}
+
+func TestStreamIncludesConnectFailures(t *testing.T) {
+	m, h := setup(t)
+	snap := metrics.Snapshot{ConnectErrors: 3, ConnectFailures: map[string]uint64{"tls_verify_hostname": 3}, ConnackReasons: map[string]uint64{"135": 1}}
+	if err := m.persist(Test{ID: "stream-run", Name: "s", Status: "completed", Snapshot: snap}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/api/v1/tests/stream-run/stream", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	for _, want := range []string{`"connectFailures":{"tls_verify_hostname":3}`, `"connackReasons":{"135":1}`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("missing %s in %s", want, w.Body.String())
+		}
+	}
+}
+
+func TestConnectFailuresCSV(t *testing.T) {
+	if got := connectFailuresCSV(map[string]uint64{"timeout": 1, "tcp": 4, "dns": 0}); got != "tcp=4;timeout=1" {
+		t.Fatal(got)
+	}
+	if got := connectFailuresCSV(nil); got != "" {
+		t.Fatal(got)
 	}
 }

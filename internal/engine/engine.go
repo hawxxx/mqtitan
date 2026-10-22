@@ -230,6 +230,8 @@ func (e *Engine) runSession(ctx context.Context, seq int, reconnecting bool, g *
 			return
 		}
 		e.Metrics.ConnectErrors.Add(1)
+		f := transport.Classify(err)
+		e.Metrics.RecordConnectFailure(f.Stage, f.Code)
 		e.Metrics.RecordError("connect")
 		return
 	}

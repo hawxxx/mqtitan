@@ -5,7 +5,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/healthz`, `/readyz` | Process probes, not broker capacity certification |
-| GET | `/metrics` | Prometheus aggregates |
+| GET | `/metrics` | Prometheus aggregates, including `emqxload_connect_failures_total{stage}` and `emqxload_connack_refusals_total{code}` |
 | POST / GET | `/api/v1/tests` | Start / list tests |
 | GET | `/api/v1/tests/{id}` | Status and metadata |
 | POST | `/api/v1/tests/{id}/stop` | Request cancellation |
@@ -13,7 +13,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | POST | `/api/v1/tests/{id}/load` | Apply [live controls](live-controls.md) |
 | GET | `/api/v1/tests/{id}/metrics` | Aggregate history |
 | GET | `/api/v1/tests/{id}/stream` | Live SSE |
-| GET | `/api/v1/tests/{id}/export?format=json` | JSON report; `format=csv` also supported (columns: timestamp, connected, published, messages_per_second, bytes_per_second, p50_ms, p95_ms, p99_ms, connection_errors, publish_errors, received, end_to_end_p95_ms, subscribe_errors) |
+| GET | `/api/v1/tests/{id}/export?format=json` | JSON report; `format=csv` also supported (columns: timestamp, connected, published, messages_per_second, bytes_per_second, p50_ms, p95_ms, p99_ms, connection_errors, publish_errors, received, end_to_end_p95_ms, subscribe_errors, connect_failures) |
 | POST / GET | `/api/v1/scenarios` | Save / list scenarios |
 | POST | `/api/v1/plan` | Validate and estimate a scenario |
 | GET | `/api/v1/doctor` | Controller-host diagnostics |
@@ -45,6 +45,15 @@ curl -N http://127.0.0.1:8080/api/v1/tests/TEST_ID/stream
 ```
 
 SSE types are `status`, `metrics`, and `heartbeat`. Slow consumers can skip snapshots; there is no `Last-Event-ID` replay. Fetch state/history after reconnecting. Lists return at most 1,000 records and metrics retrieval at most 3,600 samples. JSON export contains `data.test` and `data.samples`. Go duration fields serialize as nanoseconds unless a dedicated display field is used.
+
+## Connect failure breakdown
+
+Every snapshot (REST, SSE and JSON export) carries two additive maps that omit zero entries:
+
+- `connectFailures` maps a stage to its count: `dns`, `tcp`, `tls_handshake`, `tls_verify_chain`, `tls_verify_hostname`, `tls_alert`, `websocket_upgrade`, `mqtt_connack`, `timeout`, `other`. The counts always sum to `connectErrors`. Timeouts take precedence over every stage except `dns`: a resolver that timed out is a `dns` failure.
+- `connackReasons` maps a decimal CONNACK code (MQTT 3.1.1 return code or MQTT 5 reason code) to its count, for `mqtt_connack` failures.
+
+In CSV exports the `connect_failures` column is formatted `stage=n;stage=n`. See [Troubleshooting](troubleshooting.md#connect-failure-stages) for the usual cause of each stage.
 
 ## Security
 

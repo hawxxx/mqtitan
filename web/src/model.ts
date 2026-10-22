@@ -25,6 +25,8 @@ export interface Snapshot {
   correlationSamples?: number;
   endToEndP95?: number;
   errors?: Record<string, number>;
+  connectFailures?: Record<string, number>;
+  connackReasons?: Record<string, number>;
   peakConnected: number;
   subscriptions?: number;
   subscribeErrors?: number;
@@ -120,10 +122,16 @@ export function makeScenario(v: WizardValues): string {
       "Maximum clients must be a whole number between Clients and 1,000,000.",
     );
   if (!(v.rate > 0) || v.rate > 1000000)
-    throw new Error("Messages per client must be above 0 and at most 1,000,000.");
+    throw new Error(
+      "Messages per client must be above 0 and at most 1,000,000.",
+    );
   if (!(v.duration > 0)) throw new Error("Duration must be positive.");
   if (![0, 1, 2].includes(v.qos)) throw new Error("QoS must be 0, 1, or 2.");
-  if (!Number.isInteger(payloadSize) || payloadSize < 1 || payloadSize > 16 << 20)
+  if (
+    !Number.isInteger(payloadSize) ||
+    payloadSize < 1 ||
+    payloadSize > 16 << 20
+  )
     throw new Error("Payload size must be from 1 byte to 16 MiB.");
   const broker = v.broker.replace(/^tcp:/, "mqtt:").replace(/^ssl:/, "mqtts:");
   if (!/^(mqtt|mqtts|ws|wss):\/\/.+/.test(broker))

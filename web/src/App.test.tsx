@@ -7,6 +7,8 @@ import {
   Brokers,
   ScenarioEditor,
   BrokerTelemetry,
+  ConnectFailures,
+  topConnectFailure,
 } from "./App";
 import userEvent from "@testing-library/user-event";
 import { parse } from "yaml";
@@ -220,4 +222,26 @@ it("moves focus into the wizard and keeps Tab inside it", async () => {
   unmount();
   expect(document.activeElement).toBe(opener);
   opener.remove();
+});
+
+it("lists connect failures by stage and hides the table when there are none", () => {
+  const { rerender } = render(
+    <ConnectFailures
+      failures={{ tls_verify_hostname: 3, tcp: 1, dns: 0 }}
+      connack={{ "135": 2 }}
+    />,
+  );
+  expect(screen.getByText("tls_verify_hostname")).toBeTruthy();
+  expect(screen.getByText("3")).toBeTruthy();
+  expect(screen.getByText("tcp")).toBeTruthy();
+  expect(screen.queryByText("dns")).toBeNull();
+  expect(screen.getByText("CONNACK 135")).toBeTruthy();
+  rerender(<ConnectFailures failures={{ dns: 0 }} />);
+  expect(screen.queryByText("Connect failures by stage")).toBeNull();
+});
+
+it("names the top connect failure stage", () => {
+  expect(topConnectFailure({ tcp: 1, tls_alert: 4 })).toBe("tls_alert 4");
+  expect(topConnectFailure({ tcp: 0 })).toBe("");
+  expect(topConnectFailure(undefined)).toBe("");
 });

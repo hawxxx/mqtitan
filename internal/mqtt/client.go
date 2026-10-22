@@ -118,57 +118,60 @@ func (f *Connector) Connect(parent context.Context, id string, receive func([]by
 	}
 	return connect3(ctx, b, u, cfg, id, receive)
 }
-func dial(ctx context.Context, u *url.URL, cfg *tls.Config) (net.Conn, error) {
-	if u.Scheme == "ws" || u.Scheme == "wss" {
-		config, err := websocket.NewConfig(u.String(), "http://localhost")
-		if err != nil {
-			return nil, err
-		}
-		config.Protocol = []string{"mqtt"}
-		config.TlsConfig = cfg
-		host := u.Host
-		if u.Port() == "" {
-			port := "80"
-			if u.Scheme == "wss" {
-				port = "443"
-			}
-			host = net.JoinHostPort(u.Hostname(), port)
-		}
-		d := &net.Dialer{}
-		var conn net.Conn
-		if u.Scheme == "wss" {
-			conn, err = (&tls.Dialer{NetDialer: d, Config: cfg}).DialContext(ctx, "tcp", host)
-		} else {
-			conn, err = d.DialContext(ctx, "tcp", host)
-		}
-		if err != nil {
-			return nil, err
-		}
-		stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
-		defer stop()
-		_ = conn.SetDeadline(deadline(ctx))
-		ws, err := websocket.NewClient(config, conn)
-		if err != nil {
-			_ = conn.Close()
-			return nil, err
-		}
-		_ = conn.SetDeadline(time.Time{})
-		ws.PayloadType = websocket.BinaryFrame
-		return ws, nil
-	}
+func dial(ctx context.Context, u *url.URL, cfg *tls.Config) (net.Conn, *alertConn, error) {
+	ws := u.Scheme == "ws" || u.Scheme == "wss"
 	host := u.Host
 	if u.Port() == "" {
 		port := "1883"
-		if u.Scheme == "mqtts" {
+		switch u.Scheme {
+		case "mqtts":
 			port = "8883"
+		case "ws":
+			port = "80"
+		case "wss":
+			port = "443"
 		}
 		host = net.JoinHostPort(u.Hostname(), port)
 	}
-	d := &net.Dialer{}
-	if u.Scheme == "mqtts" {
-		return (&tls.Dialer{NetDialer: d, Config: cfg}).DialContext(ctx, "tcp", host)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", host)
+	if err != nil {
+		stage := StageTCP
+		var dns *net.DNSError
+		if errors.As(err, &dns) {
+			stage = StageDNS
+		}
+		return nil, nil, &StageError{stage, err}
 	}
-	return d.DialContext(ctx, "tcp", host)
+	if u.Scheme == "mqtts" || u.Scheme == "wss" {
+		tc := tls.Client(conn, cfg)
+		if err := tc.HandshakeContext(ctx); err != nil {
+			_ = conn.Close()
+			return nil, nil, &StageError{StageTLSHandshake, err}
+		}
+		conn = tc
+	}
+	ac := &alertConn{Conn: conn}
+	if !ws {
+		return ac, ac, nil
+	}
+	config, err := websocket.NewConfig(u.String(), "http://localhost")
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, &StageError{StageWebsocket, err}
+	}
+	config.Protocol = []string{"mqtt"}
+	config.TlsConfig = cfg
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	_ = conn.SetDeadline(deadline(ctx))
+	wsConn, err := websocket.NewClient(config, ac)
+	if err != nil {
+		_ = conn.Close()
+		return nil, nil, &StageError{StageWebsocket, err}
+	}
+	_ = conn.SetDeadline(time.Time{})
+	wsConn.PayloadType = websocket.BinaryFrame
+	return wsConn, ac, nil
 }
 
 type client3 struct {
@@ -207,15 +210,20 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	o.SetUsername(b.Username).SetPassword(b.Password)
 	o.SetDefaultPublishHandler(func(_ v3.Client, m v3.Message) { receive(m.Payload()) })
 	o.SetConnectionLostHandler(func(_ v3.Client, _ error) { c.once.Do(func() { close(c.done) }) })
+	var alert atomic.Pointer[alertConn]
+	var dialErr atomic.Pointer[error]
 	o.SetCustomOpenConnectionFn(func(_ *url.URL, _ v3.ClientOptions) (net.Conn, error) {
-		conn, err := dial(ctx, u, cfg)
-		if err == nil {
-			conn = &reportClosedConn{Conn: conn}
-			c.mu.Lock()
-			c.conn = conn
-			c.mu.Unlock()
+		conn, ac, err := dial(ctx, u, cfg)
+		if err != nil {
+			dialErr.Store(&err)
+			return nil, err
 		}
-		return conn, err
+		alert.Store(ac)
+		conn = &reportClosedConn{Conn: conn}
+		c.mu.Lock()
+		c.conn = conn
+		c.mu.Unlock()
+		return conn, nil
 	})
 	c.c = v3.NewClient(o)
 	token := c.c.Connect()
@@ -228,7 +236,15 @@ func connect3(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 	case <-token.Done():
 	}
 	if err := token.Error(); err != nil {
+		err = alert.Load().alertOr(err)
 		c.closeConn()
+		// A failed dial carries its stage; a resolver timeout must stay a DNS failure.
+		if p := dialErr.Load(); p != nil {
+			var se *StageError
+			if errors.As(*p, &se) && se.Stage == StageDNS {
+				return nil, *p
+			}
+		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -295,7 +311,7 @@ type client5 struct {
 }
 
 func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Config, id string, receive func([]byte)) (Client, error) {
-	conn, err := dial(ctx, u, cfg)
+	conn, alert, err := dial(ctx, u, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -308,16 +324,18 @@ func connect5(ctx context.Context, b scenario.Broker, u *url.URL, cfg *tls.Confi
 		keep = keepAliveSeconds(b.KeepAlive.Duration)
 	}
 	ack, err := c.Connect(ctx, &paho.Connect{ClientID: id, CleanStart: b.CleanStart, KeepAlive: keep, Username: b.Username, Password: []byte(b.Password), UsernameFlag: b.Username != "", PasswordFlag: b.Password != ""})
+	// paho.golang returns a non-nil Connack together with an error for a refusal.
+	if ack != nil && ack.ReasonCode >= 0x80 {
+		_ = conn.Close()
+		return nil, &ConnackError{ack.ReasonCode}
+	}
 	if err != nil {
+		err = alert.alertOr(err)
 		_ = conn.Close()
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, err
-	}
-	if ack.ReasonCode >= 128 {
-		_ = conn.Close()
-		return nil, fmt.Errorf("CONNACK reason %d", ack.ReasonCode)
 	}
 	return &client5{c: c, conn: conn}, nil
 }

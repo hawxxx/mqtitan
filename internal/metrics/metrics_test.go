@@ -116,3 +116,48 @@ func BenchmarkCorrectedWorstCase(b *testing.B) {
 		m.RecordPublishLatencyCorrected(1, 10*time.Second, time.Microsecond)
 	}
 }
+
+func TestConnectFailuresMergeAndSumToErrors(t *testing.T) {
+	a, b := New(), New()
+	for i, stage := range []string{"tcp", "tcp", "dns", "mqtt_connack", "bogus"} {
+		m := a
+		if i%2 == 1 {
+			m = b
+		}
+		m.ConnectErrors.Add(1)
+		code := -1
+		if stage == "mqtt_connack" {
+			code = 135
+		}
+		m.RecordConnectFailure(stage, code)
+	}
+	sa, sb := a.Snapshot(), b.Snapshot()
+	if sa.ConnectFailures["tcp"] != 1 || len(sa.ConnackReasons) != 0 {
+		t.Fatalf("%+v %+v", sa.ConnectFailures, sa.ConnackReasons)
+	}
+	m := MergeSnapshots([]Snapshot{sa, sb}, nil)
+	want := map[string]uint64{"tcp": 2, "dns": 1, "mqtt_connack": 1, "other": 1}
+	var sum uint64
+	for k, n := range m.ConnectFailures {
+		sum += n
+		if want[k] != n {
+			t.Fatalf("stage %s = %d, want %d (%v)", k, n, want[k], m.ConnectFailures)
+		}
+	}
+	if sum != m.ConnectErrors || len(m.ConnectFailures) != len(want) {
+		t.Fatalf("sum %d, errors %d, %v", sum, m.ConnectErrors, m.ConnectFailures)
+	}
+	if m.ConnackReasons["135"] != 1 || len(m.ConnackReasons) != 1 {
+		t.Fatalf("%v", m.ConnackReasons)
+	}
+	if got := MergeSnapshots([]Snapshot{New().Snapshot()}, nil); got.ConnectFailures != nil || got.ConnackReasons != nil {
+		t.Fatalf("empty merge leaked maps: %+v", got)
+	}
+}
+
+func TestRecordConnectFailureNoAlloc(t *testing.T) {
+	m := New()
+	if n := testing.AllocsPerRun(1000, func() { m.RecordConnectFailure("mqtt_connack", 135) }); n != 0 {
+		t.Fatalf("allocs=%v", n)
+	}
+}
