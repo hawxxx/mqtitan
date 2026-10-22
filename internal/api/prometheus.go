@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -100,13 +101,13 @@ func (m *Manager) prometheus(w http.ResponseWriter) {
 	fmt.Fprintf(w, "emqxload_publish_latency_seconds_bucket{le=\"+Inf\"} %d\nemqxload_publish_latency_seconds_sum %g\nemqxload_publish_latency_seconds_count %d\n", count, sum, count)
 	// Quantiles describe the latest run. Historical comparisons use the API.
 	if len(tests) > 0 {
-		s := tests[0].Snapshot
 		latest := tests[0]
 		for _, t := range tests[1:] {
 			if t.StartedAt.After(latest.StartedAt) {
 				latest = t
 			}
 		}
+		s := latest.Snapshot
 		writeLabelSeries(w, latest.Snapshot)
 		m.writeBalanceSeries(w, latest)
 		fmt.Fprintln(w, "# TYPE emqxload_e2e_latency_seconds gauge")
@@ -137,11 +138,15 @@ func writeLabelSeries(w io.Writer, s metrics.Snapshot) {
 		value      func(r metrics.LabelCount) string
 	}
 	for _, sr := range []series{
-		{"emqxload_remote_connects_total", "counter", s.RemoteAddresses, func(r metrics.LabelCount) string { return fmt.Sprintf("{address=%q,label=%q}", r.Key, r.Label) }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
-		{"emqxload_remote_active", "gauge", s.RemoteAddresses, func(r metrics.LabelCount) string { return fmt.Sprintf("{address=%q,label=%q}", r.Key, r.Label) }, func(r metrics.LabelCount) string { return strconv.FormatInt(r.Active, 10) }},
-		{"emqxload_address_label_active", "gauge", s.AddressLabels, func(r metrics.LabelCount) string { return fmt.Sprintf("{label=%q}", r.Key) }, func(r metrics.LabelCount) string { return strconv.FormatInt(r.Active, 10) }},
-		{"emqxload_dns_answers_total", "counter", s.DNSAnswers, func(r metrics.LabelCount) string { return fmt.Sprintf("{address=%q}", r.Key) }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
-		{"emqxload_dns_errors_total", "counter", s.DNSErrors, func(r metrics.LabelCount) string { return fmt.Sprintf("{resolver=%q}", r.Key) }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
+		{"emqxload_remote_connects_total", "counter", s.RemoteAddresses, func(r metrics.LabelCount) string {
+			return `{address="` + promLabel(r.Key) + `",label="` + promLabel(r.Label) + `"}`
+		}, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
+		{"emqxload_remote_active", "gauge", s.RemoteAddresses, func(r metrics.LabelCount) string {
+			return `{address="` + promLabel(r.Key) + `",label="` + promLabel(r.Label) + `"}`
+		}, func(r metrics.LabelCount) string { return strconv.FormatInt(r.Active, 10) }},
+		{"emqxload_address_label_active", "gauge", s.AddressLabels, func(r metrics.LabelCount) string { return `{label="` + promLabel(r.Key) + `"}` }, func(r metrics.LabelCount) string { return strconv.FormatInt(r.Active, 10) }},
+		{"emqxload_dns_answers_total", "counter", s.DNSAnswers, func(r metrics.LabelCount) string { return `{address="` + promLabel(r.Key) + `"}` }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
+		{"emqxload_dns_errors_total", "counter", s.DNSErrors, func(r metrics.LabelCount) string { return `{resolver="` + promLabel(r.Key) + `"}` }, func(r metrics.LabelCount) string { return strconv.FormatUint(r.Connects, 10) }},
 	} {
 		if len(sr.rows) == 0 {
 			continue
@@ -173,7 +178,7 @@ func (m *Manager) writeBalanceSeries(w io.Writer, t Test) {
 	fmt.Fprintln(w, "# TYPE emqxload_broker_connections gauge")
 	for _, s := range latest.Targets[:min(len(latest.Targets), 1024)] {
 		if s.Error == "" {
-			fmt.Fprintf(w, "emqxload_broker_connections{target=%q,zone=%q} %g\n", s.Target, s.Zone, s.Connections)
+			fmt.Fprintf(w, "emqxload_broker_connections{target=\"%s\",zone=\"%s\"} %g\n", promLabel(s.Target), promLabel(s.Zone), s.Connections)
 		}
 	}
 	complete := 0
@@ -194,3 +199,10 @@ func (m *Manager) writeBalanceSeries(w io.Writer, t Test) {
 	}
 	fmt.Fprintf(w, "# TYPE emqxload_broker_telemetry_complete gauge\nemqxload_broker_telemetry_complete %d\n", complete)
 }
+
+var labelEscaper = strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
+
+// promLabel escapes a label value for the Prometheus text format, which only
+// knows \\, \" and \n; other bytes, including tabs and UTF-8, are literal.
+// Invalid UTF-8 from worker reports is replaced, since values must be UTF-8.
+func promLabel(v string) string { return labelEscaper.Replace(strings.ToValidUTF8(v, "\uFFFD")) }

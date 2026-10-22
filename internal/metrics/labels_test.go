@@ -3,7 +3,9 @@ package metrics
 import (
 	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func ap(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }
@@ -133,5 +135,22 @@ func TestDNSAnswersAndErrorsCounted(t *testing.T) {
 	}
 	if v, _ := find(s.DNSErrors, "192.0.2.53:53"); v.Connects != 2 || len(s.DNSErrors) != 1 {
 		t.Fatalf("errors = %+v", s.DNSErrors)
+	}
+}
+
+func TestMergeLabelCountsTruncatesOnRuneBoundary(t *testing.T) {
+	long := strings.Repeat("a", 127) + "€" + "tail" // the rune spans bytes 127-129
+	got := MergeSnapshots([]Snapshot{{AddressLabels: []LabelCount{{Key: long, Label: long, Connects: 1}}}}, nil).AddressLabels
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	for _, v := range []string{got[0].Key, got[0].Label} {
+		if !utf8.ValidString(v) || v != strings.Repeat("a", 127) {
+			t.Fatalf("truncated to %q (%d bytes)", v, len(v))
+		}
+	}
+	ok := strings.Repeat("b", 125) + "€" // exactly 128 bytes stays whole
+	if got := MergeSnapshots([]Snapshot{{DNSErrors: []LabelCount{{Key: ok, Connects: 1}}}}, nil).DNSErrors; got[0].Key != ok {
+		t.Fatalf("got %q", got[0].Key)
 	}
 }

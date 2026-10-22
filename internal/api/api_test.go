@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/emqx"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/storage"
 	"net/http"
@@ -372,5 +373,61 @@ workloads: [{name: idle, type: connection, clients: 60000}]
 		if w := post(bad); w.Code != 400 {
 			t.Fatalf("workers %s: %d", bad, w.Code)
 		}
+	}
+}
+
+func TestPrometheusLabelEscaping(t *testing.T) {
+	in := "a\tb\"c\\d\ne€"
+	if got, want := promLabel(in), "a\tb\\\"c\\\\d\\ne€"; got != want {
+		t.Fatalf("promLabel(%q) = %q, want %q", in, got, want)
+	}
+	m, h := setup(t)
+	snap := metrics.Snapshot{AddressLabels: []metrics.LabelCount{{Key: in, Active: 1}}, RemoteAddresses: []metrics.LabelCount{{Key: "192.0.2.1:1883", Label: in, Connects: 1}}}
+	if err := m.persist(Test{ID: "escape", Name: "e", Status: "completed", StartedAt: time.Now(), Snapshot: snap}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal([]emqx.FleetSample{{Complete: true, Targets: []emqx.TargetSample{{Target: in, Zone: in, Connections: 2}}}})
+	if err := m.store.Put("brokers", "escape", b); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	body := w.Body.String()
+	esc := promLabel(in)
+	for _, want := range []string{
+		`emqxload_address_label_active{label="` + esc + `"} 1`,
+		`emqxload_remote_connects_total{address="192.0.2.1:1883",label="` + esc + `"} 1`,
+		`emqxload_broker_connections{target="` + esc + `",zone="` + esc + `"} 2`,
+	} {
+		if !strings.Contains(body, want+"\n") {
+			t.Fatalf("missing %s in\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `\u20ac`) || strings.Contains(body, `\t`) {
+		t.Fatal("Go escapes in label values")
+	}
+}
+
+func TestPrometheusQuantilesDescribeLatestTest(t *testing.T) {
+	m, h := setup(t)
+	now := time.Now()
+	// IDs sort the older test first, so tests[0] is not the latest by StartedAt.
+	for _, x := range []Test{
+		{ID: "a-new", Name: "n", Status: "completed", StartedAt: now, Snapshot: metrics.Snapshot{EndToEndP95: time.Second}},
+		{ID: "b-old", Name: "o", Status: "completed", StartedAt: now.Add(-time.Hour), Snapshot: metrics.Snapshot{EndToEndP95: 7 * time.Second}},
+		{ID: "c-old", Name: "o", Status: "completed", StartedAt: now.Add(-2 * time.Hour), Snapshot: metrics.Snapshot{EndToEndP95: 9 * time.Second}},
+	} {
+		if err := m.persist(x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := httptest.NewRequest("GET", "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer controller-secret")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if body := w.Body.String(); !strings.Contains(body, `emqxload_e2e_latency_seconds{quantile="0.95"} 1`+"\n") {
+		t.Fatalf("quantiles not from the latest test:\n%s", body)
 	}
 }

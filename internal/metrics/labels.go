@@ -5,6 +5,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 // MaxLabelKeys bounds every label list: further keys fold into OtherKey.
@@ -210,12 +211,7 @@ func mergeLabelCounts(dst, src []LabelCount) []LabelCount {
 		idx[r.Key] = i
 	}
 	for _, r := range src {
-		if len(r.Key) > maxKeyBytes {
-			r.Key = r.Key[:maxKeyBytes]
-		}
-		if len(r.Label) > maxKeyBytes {
-			r.Label = r.Label[:maxKeyBytes]
-		}
+		r.Key, r.Label = truncateKey(r.Key), truncateKey(r.Label)
 		r.Active = max(0, r.Active)
 		if i, ok := idx[r.Key]; ok {
 			dst[i].Connects += r.Connects
@@ -229,6 +225,18 @@ func mergeLabelCounts(dst, src []LabelCount) []LabelCount {
 		dst = append(dst, r)
 	}
 	return capLabelCounts(dst)
+}
+
+// truncateKey cuts v to at most maxKeyBytes without splitting a UTF-8 rune.
+func truncateKey(v string) string {
+	if len(v) <= maxKeyBytes {
+		return v
+	}
+	n := maxKeyBytes
+	for n > 0 && !utf8.RuneStart(v[n]) {
+		n--
+	}
+	return v[:n]
 }
 
 func capLabelCounts(l []LabelCount) []LabelCount {
