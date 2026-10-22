@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Base images are pinned by digest; Dependabot (docker ecosystem) bumps them.
-FROM --platform=$BUILDPLATFORM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS ui
+FROM --platform=$BUILDPLATFORM node:23-alpine@sha256:a34e14ef1df25b58258956049ab5a71ea7f0d498e41d0b514f4b8de09af09456 AS ui
 WORKDIR /src/web
 RUN --mount=type=bind,source=web/package.json,target=package.json \
     --mount=type=bind,source=web/package-lock.json,target=package-lock.json \
