@@ -56,9 +56,7 @@ PY
 }
 
 # balanced: exit 0, three addresses with more than 20% of connects each,
-# churn counters, three DNS answers, and no connect failures except the odd
-# CONNACK refusal. EMQX can answer code 3 (server unavailable) when a client ID
-# reconnects immediately after its DISCONNECT; connection_error_rate bounds it.
+# churn counters, three DNS answers, and no connect failures.
 run_scenario balanced
 if [ "$code" != 0 ]; then
   bad balanced "exit $code"
@@ -75,7 +73,7 @@ print("  shares:", {a["key"]: round(100 * a["connects"] / total, 1) for a in add
 ok = (len(addrs) == 3 and all(a["connects"] * 5 > total for a in addrs)
       and s["churned"] > 0 and s["churnReconnects"] > 0
       and len(s["dnsAnswers"]) == 3
-      and set(s.get("connectFailures") or {}) <= {"mqtt_connack"})
+      and not s.get("connectFailures"))
 sys.exit(0 if ok else 1)
 PY
 then

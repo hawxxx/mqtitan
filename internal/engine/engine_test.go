@@ -593,11 +593,14 @@ func lifetimeScenario(url string, life time.Duration, d time.Duration) scenario.
 	return s
 }
 
+// fastChurn shortens the churn reconnect pause for tests of churn counting.
+var fastChurn = [2]time.Duration{time.Millisecond, time.Millisecond}
+
 func TestLifetimeChurnReconnects(t *testing.T) {
 	s := lifetimeScenario(testBroker(t), 50*time.Millisecond, 230*time.Millisecond)
 	s.Broker.Reconnect = scenario.Reconnect{Enabled: false}
 	m := metrics.New()
-	e := Engine{Scenario: s, Metrics: m}
+	e := Engine{Scenario: s, Metrics: m, churnDelay: fastChurn}
 	if err := e.Run(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -614,7 +617,7 @@ func TestLifetimeDoesNotConsumeRetryBudget(t *testing.T) {
 	m := metrics.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	e := Engine{Scenario: s, Metrics: m}
+	e := Engine{Scenario: s, Metrics: m, churnDelay: fastChurn}
 	go func() { done <- e.Run(ctx) }()
 	time.Sleep(200 * time.Millisecond)
 	before := m.Churned.Load()
@@ -666,7 +669,7 @@ func TestFailureAfterChurnCountsAsReconnect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	e := Engine{Scenario: s, Metrics: m}
+	e := Engine{Scenario: s, Metrics: m, churnDelay: fastChurn}
 	go func() { done <- e.Run(ctx) }()
 	for m.ChurnReconnects.Load() < 1 || m.Connected.Load() != 1 {
 		select {
@@ -693,4 +696,57 @@ func TestFailureAfterChurnCountsAsReconnect(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestChurnDelayRange(t *testing.T) {
+	s := baseScenario("mqtt://127.0.0.1:1", "5")
+	s.Seed = 42
+	e := Engine{Scenario: s}
+	seen := map[time.Duration]bool{}
+	for seq := 1; seq <= 200; seq++ {
+		d := e.churnDelayFor(seq, 0)
+		if d < 100*time.Millisecond || d > time.Second {
+			t.Fatalf("churn delay %v outside [100ms,1s]", d)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("churn delays are all equal")
+	}
+	if e.churnDelayFor(7, 3) != e.churnDelayFor(7, 3) {
+		t.Fatal("churn delay is not deterministic")
+	}
+}
+
+func TestChurnReconnectWaitsBeforeReconnecting(t *testing.T) {
+	s := lifetimeScenario(testBroker(t), 20*time.Millisecond, 250*time.Millisecond)
+	m := metrics.New()
+	e := Engine{Scenario: s, Metrics: m}
+	if err := e.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// Each churn cycle is 20ms connected plus at least 100ms of jitter.
+	if got := m.Snapshot(); got.Churned < 1 || got.Churned > 3 {
+		t.Fatalf("churn counters %+v", got)
+	}
+}
+
+func TestPartitionsDrawDifferentLifetimes(t *testing.T) {
+	s := baseScenario("mqtt://127.0.0.1:1", "5")
+	s.Seed = 42
+	s.Clients.Lifetime = &scenario.Lifetime{Min: scenario.Duration{Duration: time.Second}, Max: scenario.Duration{Duration: time.Hour}}
+	a, b := Engine{Scenario: s}, Engine{Scenario: s}
+	b.Scenario.Clients.SequenceOffset = 100
+	if a.lifetimeFor(1, 0) == b.lifetimeFor(1, 0) {
+		t.Fatal("partitions with different offsets draw the same lifetime for local seq 1")
+	}
+	if a.churnDelayFor(1, 0) == b.churnDelayFor(1, 0) {
+		t.Fatal("partitions with different offsets draw the same churn delay")
+	}
+	if a.dialSeed() == b.dialSeed() {
+		t.Fatal("partitions with different offsets share the dialer seed")
+	}
+	if a.dialSeed() != s.Seed {
+		t.Fatal("offset 0 changed the dialer seed")
+	}
 }

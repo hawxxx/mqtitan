@@ -25,7 +25,18 @@ type Engine struct {
 	Control        *Control
 	runID          [16]byte
 	connector      *transport.Connector
+	// churnDelay overrides [churnDelayMin, churnDelayMax] in tests.
+	churnDelay [2]time.Duration
 }
+
+// A churned client waits a jittered pause before reconnecting with the same
+// client ID, so the broker can finish closing the previous session instead of
+// refusing the new one (EMQX answers CONNACK 3, server unavailable).
+const (
+	churnDelayMin = 100 * time.Millisecond
+	churnDelayMax = time.Second
+)
+
 type worker struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -59,7 +70,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		labels = append(labels, l.Label)
 	}
 	e.Metrics.SetAddressLabels(prefixes, labels)
-	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, Seed: e.Scenario.Seed, StrictSecrets: e.Scenario.Safety.StrictSecrets})
+	connector, err := transport.NewConnectorWithHooks(e.Scenario.Broker, transport.Hooks{OnResolve: e.Metrics.RecordDNSAnswers, OnResolveError: e.Metrics.RecordDNSError, Seed: e.dialSeed(), StrictSecrets: e.Scenario.Safety.StrictSecrets})
 	if err != nil {
 		return err
 	}
@@ -183,10 +194,18 @@ func (e *Engine) runClient(ctx context.Context, seq int) {
 			return
 		}
 		if churned {
-			// A planned end is neither a failure nor a retry: reconnect at once.
+			// A planned end is neither a failure nor a retry: reconnect after a
+			// short jittered pause.
 			kind = sessionChurn
 			retries = 0
 			backoff = initial
+			timer := time.NewTimer(e.churnDelayFor(seq, lives))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			continue
 		}
 		kind = sessionFirst
@@ -222,15 +241,35 @@ func (e *Engine) runClient(ctx context.Context, seq int) {
 }
 
 // lifetimeFor draws the n-th session lifetime of client seq uniformly from the
-// configured [min, max]; it is deterministic for a given seed.
+// configured [min, max]; it is deterministic for a given seed. The global
+// sequence keeps distributed partitions from churning in lockstep.
 func (e *Engine) lifetimeFor(seq, n int) time.Duration {
 	l := e.Scenario.Clients.Lifetime
-	lo, hi := l.Min.Duration, l.Max.Duration
+	return e.draw(l.Min.Duration, l.Max.Duration, e.Scenario.Seed, seq, n)
+}
+
+// churnDelayFor draws the pause before the n-th churn reconnect of client seq.
+func (e *Engine) churnDelayFor(seq, n int) time.Duration {
+	lo, hi := churnDelayMin, churnDelayMax
+	if e.churnDelay[1] > 0 {
+		lo, hi = e.churnDelay[0], e.churnDelay[1]
+	}
+	return e.draw(lo, hi, e.Scenario.Seed^0x636875726e /* "churn" */, seq, n)
+}
+
+func (e *Engine) draw(lo, hi time.Duration, seed uint64, seq, n int) time.Duration {
 	if hi <= lo {
 		return lo
 	}
-	r := mrand.New(mrand.NewPCG(e.Scenario.Seed, uint64(seq)<<32|uint64(n)))
+	global := uint64(seq + e.Scenario.Clients.SequenceOffset)
+	r := mrand.New(mrand.NewPCG(seed, global<<32|uint64(n)))
 	return lo + time.Duration(r.Int64N(int64(hi-lo)+1))
+}
+
+// dialSeed seeds the dialer's address shuffle; mixing in the partition offset
+// keeps distributed workers from picking the same addresses in lockstep.
+func (e *Engine) dialSeed() uint64 {
+	return e.Scenario.Seed ^ uint64(e.Scenario.Clients.SequenceOffset)*0x9e3779b97f4a7c15
 }
 func (e *Engine) generator(seq int) (*payload.Generator, error) {
 	w := e.workload(seq)
