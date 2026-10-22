@@ -39,7 +39,6 @@ import {
   FileCode2,
   Gauge,
   GitCompareArrows,
-  Layers,
   LayoutDashboard,
   Play,
   Plus,
@@ -2201,9 +2200,7 @@ function Shell() {
       </a>
       <aside className="sidebar">
         <Link to="/" className="brand">
-          <div className="brand-symbol">
-            <Layers size={25} />
-          </div>
+          <img className="brand-symbol" src="/emblem.png" alt="" />
           <span>
             MQ<span className="brand-accent">Titan</span>
             <small>PERFORMANCE LAB</small>

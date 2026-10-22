@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/brand/mqtitan-logo-horizontal.png" alt="MQTitan" width="480">
+</p>
+
 # MQTTitan
 
 ![MQTTitan dashboard during a live run](docs/images/dashboard.png)

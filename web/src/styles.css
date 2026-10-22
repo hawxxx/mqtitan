@@ -196,15 +196,9 @@ pre,
   letter-spacing: -0.6px;
 }
 .brand-symbol {
-  height: 41px;
-  width: 38px;
-  color: var(--teal);
-  display: grid;
-  place-items: center;
-  border: 1px solid #286456;
-  border-radius: 8px;
-  transform: rotate(-4deg);
-  background: #12362d;
+  height: 44px;
+  width: auto;
+  flex: none;
 }
 .brand small {
   display: block;
