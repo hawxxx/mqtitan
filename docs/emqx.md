@@ -64,7 +64,7 @@ sum by (pod, zone) (emqx_live_connections_count * on (pod) group_left(node) kube
 
 While a pod is being replaced `kube_pod_info` can briefly hold two series for one pod and the join fails with a many-to-many error. Use `max by (pod, node) (kube_pod_info{namespace="emqx"})` in its place to avoid it. kube-state-metrics only exports node labels listed in its `metricLabelsAllowlist` (`nodes=[topology.kubernetes.io/zone]`); without it the zone is empty and `zone_connection_skew` fails with `no observations`.
 
-Prometheus cannot report a pod it never scraped, so set `expectedTargets` to the number of brokers; otherwise a missing pod goes unnoticed. `baseline: first` judges balance on the test's own connections when other clients share the brokers. The poller runs on the controller, so the controller needs network access to Prometheus (for example `kubectl port-forward`), while workers can run elsewhere. The end-to-end proof is `deploy/e2e/balance/run.sh`.
+Prometheus cannot report a pod it never scraped, so set `expectedTargets` to the number of brokers; otherwise a missing pod goes unnoticed, and `validate` and `plan` warn when a balance threshold is configured. `baseline: first` judges balance on the test's own connections when other clients share the brokers. The poller runs on the controller, so the controller needs network access to Prometheus (for example `kubectl port-forward`), while workers can run elsewhere. The end-to-end proof is `deploy/e2e/balance/run.sh`.
 
 ### Allowed telemetry hosts
 

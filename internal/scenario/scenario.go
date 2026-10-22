@@ -340,6 +340,8 @@ func (s Scenario) Validate() error {
 	problems = append(problems, s.Safety.check(s)...)
 	if s.Telemetry != nil {
 		problems = append(problems, s.Telemetry.check()...)
+	} else if s.hasBalanceThreshold() {
+		problems = append(problems, "thresholds broker_connection_cv and zone_connection_skew require a telemetry block")
 	}
 	if len(problems) == 0 && s.needsRenderCheck() {
 		if err := s.CheckRendered(s.Clients.Worker, s.Clients.SequenceOffset, s.Clients.SequenceOffset+s.Clients.Count); err != nil {
@@ -388,6 +390,13 @@ type PlanOptions struct {
 
 func (s Scenario) Plan() Plan { return s.PlanWith(PlanOptions{}) }
 
+// hasBalanceThreshold reports whether a threshold judges broker telemetry.
+func (s Scenario) hasBalanceThreshold() bool {
+	_, cv := s.Thresholds["broker_connection_cv"]
+	_, skew := s.Thresholds["zone_connection_skew"]
+	return cv || skew
+}
+
 func (s Scenario) PlanWith(o PlanOptions) Plan {
 	peak := 0
 	var duration time.Duration
@@ -414,6 +423,9 @@ func (s Scenario) PlanWith(o PlanOptions) Plan {
 		}
 	}
 	warnings = append(warnings, s.idleWarnings()...)
+	if t := s.Telemetry; t != nil && t.Prometheus != nil && t.ExpectedTargets == 0 && s.hasBalanceThreshold() {
+		warnings = append(warnings, "telemetry.expectedTargets is 0; a pod missing from Prometheus will not fail balance thresholds")
+	}
 	if w := s.portWarning(peak, o); w != "" {
 		warnings = append(warnings, w)
 	}

@@ -298,3 +298,47 @@ func TestTelemetryValidation(t *testing.T) {
 		t.Errorf("many: %v", err)
 	}
 }
+
+func TestBalanceThresholdsRequireTelemetry(t *testing.T) {
+	want := "thresholds broker_connection_cv and zone_connection_skew require a telemetry block"
+	for _, name := range []string{"broker_connection_cv", "zone_connection_skew"} {
+		s := safetyScenario(Safety{}, "c-${sequence}")
+		s.Thresholds = map[string]string{name: "<10%"}
+		if err := s.Validate(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v", name, err)
+		}
+		s.Telemetry = &Telemetry{EMQX: []EMQXTarget{{Name: "a", URL: "http://198.51.100.1:18083"}}}
+		if err := s.Validate(); err != nil {
+			t.Errorf("%s with telemetry: %v", name, err)
+		}
+	}
+}
+
+func TestPrometheusWithoutExpectedTargetsWarns(t *testing.T) {
+	want := "telemetry.expectedTargets is 0; a pod missing from Prometheus will not fail balance thresholds"
+	has := func(s Scenario) bool {
+		for _, w := range s.Plan().Warnings {
+			if w == want {
+				return true
+			}
+		}
+		return false
+	}
+	s := safetyScenario(Safety{}, "c-${sequence}")
+	s.Telemetry = &Telemetry{Prometheus: &PrometheusSource{URL: "http://prometheus.example.net:9090", Query: "up"}}
+	if has(s) {
+		t.Error("warned without a balance threshold")
+	}
+	s.Thresholds = map[string]string{"zone_connection_skew": "<15%"}
+	if !has(s) {
+		t.Errorf("no warning: %v", s.Plan().Warnings)
+	}
+	s.Telemetry.ExpectedTargets = 3
+	if has(s) {
+		t.Error("warned with expectedTargets set")
+	}
+	s.Telemetry = &Telemetry{EMQX: []EMQXTarget{{Name: "a", URL: "http://198.51.100.1:18083"}}}
+	if has(s) {
+		t.Error("warned for an emqx target list")
+	}
+}
