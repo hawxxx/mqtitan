@@ -174,10 +174,10 @@ func executeScenario(raw string, o runOptions) error {
 	if err = thresholds.Validate(s.Thresholds); err != nil {
 		return err
 	}
-	printPlan(os.Stdout, s, s.Plan())
+	ids := splitWorkers(o.Workers)
+	printPlan(os.Stdout, s, s.PlanWith(scenario.PlanOptions{Workers: len(ids)}))
 	ctx, cancel := signalContext()
 	defer cancel()
-	ids := splitWorkers(o.Workers)
 	if o.Controller != "" {
 		return remoteRun(ctx, o.Controller, raw, ids)
 	}
