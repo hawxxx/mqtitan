@@ -1624,6 +1624,12 @@ textarea:focus {
   padding-top: 14px;
   margin-top: 14px;
 }
+.tls-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
 .tls-profile-details {
   display: flex;
   flex-wrap: wrap;
