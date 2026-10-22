@@ -18,7 +18,7 @@ broker:
     caFile: /etc/mqtitan/ca.pem
     certFile: /etc/mqtitan/client.pem
     keyFile: /etc/mqtitan/client.key
-    serverName: broker-01.region-1.example.com
+    serverName: broker-01.zone-a.example.com
     hostnameVerification: cn-fallback
   dns:
     resolveEachDial: true
@@ -71,6 +71,6 @@ thresholds:
   broker_connection_cv: "<10%"
   zone_connection_skew: "<15%"
 safety:
-  forbiddenTopicPrefixes: ["s1/", "lan/", "interfaceStats/"]
+  forbiddenTopicPrefixes: ["devices/", "telemetry/", "ops/"]
   clientIdDenyRegex: "^[0-9a-fA-F]{12}$|^[A-Z0-9]{10}$"
   strictSecrets: true

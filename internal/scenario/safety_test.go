@@ -29,33 +29,33 @@ func subTopic(topic string) Workload {
 }
 
 func TestForbiddenPrefixPublisher(t *testing.T) {
-	s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"s1/"}}, "c-${sequence}", pubTopic("s1/fleet/${clientId}"))
+	s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"devices/"}}, "c-${sequence}", pubTopic("devices/fleet/${clientId}"))
 	err := s.Validate()
-	if err == nil || !strings.Contains(err.Error(), `workload "pub"`) || !strings.Contains(err.Error(), `forbidden prefix "s1/"`) {
+	if err == nil || !strings.Contains(err.Error(), `workload "pub"`) || !strings.Contains(err.Error(), `forbidden prefix "devices/"`) {
 		t.Fatalf("got %v", err)
 	}
-	s = safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"s1/"}}, "c-${sequence}", pubTopic("loadtest/${clientId}"))
+	s = safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"devices/"}}, "c-${sequence}", pubTopic("loadtest/${clientId}"))
 	if err := s.Validate(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestForbiddenPrefixHashSuffixNormalised(t *testing.T) {
-	s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"s1/#"}}, "c-${sequence}", pubTopic("s1/fleet/x"))
+	s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"devices/#"}}, "c-${sequence}", pubTopic("devices/fleet/x"))
 	if err := s.Validate(); err == nil || !strings.Contains(err.Error(), "forbidden prefix") {
 		t.Fatalf("got %v", err)
 	}
 }
 
 func TestForbiddenPrefixWildcardFilters(t *testing.T) {
-	for _, f := range []string{"#", "+/fleet/x", "s1/+/#", "$share/g/s1/fleet/a", "$queue/s1/fleet/#"} {
-		s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"s1/fleet/"}}, "c-${sequence}", subTopic(f))
+	for _, f := range []string{"#", "+/fleet/x", "devices/+/#", "$share/g/devices/fleet/a", "$queue/devices/fleet/#"} {
+		s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"devices/fleet/"}}, "c-${sequence}", subTopic(f))
 		if err := s.Validate(); err == nil {
 			t.Fatalf("%q accepted", f)
 		}
 	}
-	for _, f := range []string{"s2/#", "s1/other/#"} {
-		s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"s1/fleet/"}}, "c-${sequence}", subTopic(f))
+	for _, f := range []string{"ops/#", "devices/other/#"} {
+		s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"devices/fleet/"}}, "c-${sequence}", subTopic(f))
 		if err := s.Validate(); err != nil {
 			t.Fatalf("%q rejected: %v", f, err)
 		}
@@ -67,20 +67,20 @@ func TestFilterOverlapsPrefix(t *testing.T) {
 		filter, prefix string
 		want           bool
 	}{
-		{"#", "s1/fleet/", true},
-		{"s1/#", "s1/fleet/", true},
-		{"s1/fleet/#", "s1/fleet/", true},
-		{"s1/fleet/a", "s1/fleet/", true},
-		{"s1/+", "s1/fleet/", false},
-		{"s1/+/x", "s1/fleet/", true},
-		{"+/fleet/x", "s1/fleet/", true},
-		{"s1", "s1/fleet/", false},
-		{"s1/other/#", "s1/fleet/", false},
-		{"s2/#", "s1/fleet/", false},
-		{"$share/g/s1/fleet/a", "s1/fleet/", true},
-		{"$share/g/s2/a", "s1/fleet/", false},
-		{"$queue/s1/fleet/#", "s1/fleet/", true},
-		{"$queue/s2/#", "s1/fleet/", false},
+		{"#", "devices/fleet/", true},
+		{"devices/#", "devices/fleet/", true},
+		{"devices/fleet/#", "devices/fleet/", true},
+		{"devices/fleet/a", "devices/fleet/", true},
+		{"devices/+", "devices/fleet/", false},
+		{"devices/+/x", "devices/fleet/", true},
+		{"+/fleet/x", "devices/fleet/", true},
+		{"devices", "devices/fleet/", false},
+		{"devices/other/#", "devices/fleet/", false},
+		{"ops/#", "devices/fleet/", false},
+		{"$share/g/devices/fleet/a", "devices/fleet/", true},
+		{"$share/g/ops/a", "devices/fleet/", false},
+		{"$queue/devices/fleet/#", "devices/fleet/", true},
+		{"$queue/ops/#", "devices/fleet/", false},
 	} {
 		if got := filterOverlapsPrefix(tt.filter, tt.prefix); got != tt.want {
 			t.Errorf("filterOverlapsPrefix(%q, %q) = %v, want %v", tt.filter, tt.prefix, got, tt.want)
@@ -89,9 +89,9 @@ func TestFilterOverlapsPrefix(t *testing.T) {
 }
 
 func TestForbiddenPrefixRenderedTopic(t *testing.T) {
-	s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"s1/"}}, "s1/fleet/${sequence}", pubTopic("${clientId}/x"))
+	s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"devices/"}}, "devices/fleet/${sequence}", pubTopic("${clientId}/x"))
 	err := s.Validate()
-	if err == nil || !strings.Contains(err.Error(), `forbidden prefix "s1/"`) {
+	if err == nil || !strings.Contains(err.Error(), `forbidden prefix "devices/"`) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -136,7 +136,7 @@ func TestCheckRenderedSkippedWithoutRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	// prefixes without templated topics need no rendering either
-	s.Safety.ForbiddenTopicPrefixes = []string{"s1/"}
+	s.Safety.ForbiddenTopicPrefixes = []string{"devices/"}
 	s.Workloads[0].Topic = "loadtest/static"
 	if err := s.Validate(); err != nil {
 		t.Fatal(err)
@@ -150,7 +150,7 @@ func TestRenderCheckBound(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow")
 	}
-	s := safetyScenario(Safety{ClientIDDenyRegex: `^[0-9a-fA-F]{12}$`, ForbiddenTopicPrefixes: []string{"s1/"}}, "mqtitan-${sequence:08}", pubTopic("loadtest/${clientId}"))
+	s := safetyScenario(Safety{ClientIDDenyRegex: `^[0-9a-fA-F]{12}$`, ForbiddenTopicPrefixes: []string{"devices/"}}, "mqtitan-${sequence:08}", pubTopic("loadtest/${clientId}"))
 	s.Clients.Count = 1_000_000
 	s.Stages[0].TargetClients = 1_000_000
 	s.Workloads[0].Clients = 1_000_000
@@ -245,13 +245,13 @@ func TestRendererMatchesEngineExpansion(t *testing.T) {
 }
 
 func TestForbiddenPrefixMustBeLiteral(t *testing.T) {
-	for _, p := range []string{"s1/+/telemetry/", "s1/#/x", "+", "", "#", "s1/\x00", "s1/a#"} {
+	for _, p := range []string{"devices/+/telemetry/", "devices/#/x", "+", "", "#", "devices/\x00", "devices/a#"} {
 		err := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{p}}, "c-${sequence}").Validate()
 		if err == nil || !strings.Contains(err.Error(), "safety.forbiddenTopicPrefixes[0] must be a literal topic prefix (wildcards are not allowed)") {
 			t.Errorf("%q: %v", p, err)
 		}
 	}
-	for _, p := range []string{"s1/", "s1/#", "s1"} {
+	for _, p := range []string{"devices/", "devices/#", "devices"} {
 		if err := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{p}}, "c-${sequence}").Validate(); err != nil {
 			t.Errorf("%q: %v", p, err)
 		}

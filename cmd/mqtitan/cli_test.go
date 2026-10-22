@@ -125,7 +125,7 @@ broker: {url: 'mqtts://broker.example.com:8883', version: '3.1.1', keepAlive: 18
 clients: {count: 10000, idTemplate: 'c-${sequence:08}'}
 stages: [{duration: 1s, targetClients: 10000}]
 workloads: [{name: idle, type: connection, clients: 10000}]
-safety: {forbiddenTopicPrefixes: ['s1/', 's2/'], clientIdDenyRegex: '^[0-9a-f]{12}$'}
+safety: {forbiddenTopicPrefixes: ['devices/', 'ops/'], clientIdDenyRegex: '^[0-9a-f]{12}$'}
 `
 
 func TestPlanPrintsSafetyDNSAndWarnings(t *testing.T) {

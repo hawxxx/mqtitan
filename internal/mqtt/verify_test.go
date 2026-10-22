@@ -30,16 +30,16 @@ func TestMatchCommonNameTable(t *testing.T) {
 		pattern, host string
 		want          bool
 	}{
-		{"*.region-1.prod.example.net", "emqtt-01.region-1.prod.example.net", true},
-		{"*.region-1.prod.example.net", "broker-7f3a91c2-pub.region-1.prod.example.net", true},
-		{"*.region-1.prod.example.net", "EMQTT-01.Region-1.Prod.Example.Net.", true},
-		{"*.region-1.prod.example.net", "emqtt-prod.example.net", false},
-		{"*.region-1.prod.example.net", "a.b.region-1.prod.example.net", false},
-		{"*.region-1.prod.example.net", "region-1.prod.example.net", false},
-		{"*.region-1.prod.example.net", ".region-1.prod.example.net", false},
+		{"*.zone-a.example.net", "broker-01.zone-a.example.net", true},
+		{"*.zone-a.example.net", "broker-a1b2.zone-a.example.net", true},
+		{"*.zone-a.example.net", "BROKER-01.Zone-A.Example.Net.", true},
+		{"*.zone-a.example.net", "other-broker.example.net", false},
+		{"*.zone-a.example.net", "a.b.zone-a.example.net", false},
+		{"*.zone-a.example.net", "zone-a.example.net", false},
+		{"*.zone-a.example.net", ".zone-a.example.net", false},
 		{"broker.example.net", "broker.example.net", true},
 		{"broker.example.net", "other.example.net", false},
-		{"emqtt*.example.net", "emqtt-01.example.net", false}, // partial wildcard
+		{"broker*.example.net", "broker-01.example.net", false}, // partial wildcard
 		{"*.*.example.net", "a.b.example.net", false},
 		{"*.net", "example.net", false}, // needs two labels after *
 		{"*.example.net", "192.0.2.1", false},
@@ -139,7 +139,7 @@ func serveTLS(t *testing.T, cert tls.Certificate, ws bool) string {
 	return "mqtts://" + l.Address()
 }
 
-const testServerName = "emqtt-01.region-1.prod.example.net"
+const testServerName = "broker-01.zone-a.example.net"
 
 // connectAll dials with every transport and protocol version and calls check
 // with the outcome; check receives a nil error when the connection succeeded.
@@ -184,7 +184,7 @@ func wantAs[T error](t *testing.T) func(*testing.T, error) {
 
 func TestCNOnlyCertificateDefaultSANFails(t *testing.T) {
 	pki := newTestPKI(t)
-	cert := pki.issue(t, cnLeaf("*.region-1.prod.example.net"))
+	cert := pki.issue(t, cnLeaf("*.zone-a.example.net"))
 	connectAll(t, cert, scenario.TLS{CAPEM: string(pki.pem), ServerName: testServerName}, func(t *testing.T, err error) {
 		if err == nil || !strings.Contains(err.Error(), "legacy Common Name field") {
 			t.Fatalf("error = %v, want legacy Common Name field", err)
@@ -194,19 +194,19 @@ func TestCNOnlyCertificateDefaultSANFails(t *testing.T) {
 
 func TestCNFallbackAcceptsCNOnlyCertificate(t *testing.T) {
 	pki := newTestPKI(t)
-	cert := pki.issue(t, cnLeaf("*.region-1.prod.example.net"))
+	cert := pki.issue(t, cnLeaf("*.zone-a.example.net"))
 	connectAll(t, cert, scenario.TLS{CAPEM: string(pki.pem), ServerName: testServerName, HostnameVerification: "cn-fallback"}, func(t *testing.T, err error) { wantOK(t, err) })
 }
 
 func TestCNFallbackRejectsWrongHost(t *testing.T) {
 	pki := newTestPKI(t)
-	cert := pki.issue(t, cnLeaf("*.region-1.prod.example.net"))
-	connectAll(t, cert, scenario.TLS{CAPEM: string(pki.pem), ServerName: "emqtt-prod.example.net", HostnameVerification: "cn-fallback"}, wantAs[*HostnameMismatchError](t))
+	cert := pki.issue(t, cnLeaf("*.zone-a.example.net"))
+	connectAll(t, cert, scenario.TLS{CAPEM: string(pki.pem), ServerName: "other-broker.example.net", HostnameVerification: "cn-fallback"}, wantAs[*HostnameMismatchError](t))
 }
 
 func TestSANPresentDisablesCNFallback(t *testing.T) {
 	pki := newTestPKI(t)
-	cert := pki.issue(t, cnLeaf("*.region-1.prod.example.net", "other.example.net"))
+	cert := pki.issue(t, cnLeaf("*.zone-a.example.net", "other.example.net"))
 	connectAll(t, cert, scenario.TLS{CAPEM: string(pki.pem), ServerName: testServerName, HostnameVerification: "cn-fallback"}, wantAs[*HostnameMismatchError](t))
 	connectAll(t, cert, scenario.TLS{CAPEM: string(pki.pem), ServerName: "other.example.net", HostnameVerification: "cn-fallback"}, func(t *testing.T, err error) { wantOK(t, err) })
 }
@@ -214,14 +214,14 @@ func TestSANPresentDisablesCNFallback(t *testing.T) {
 func TestCNFallbackRejectsWrongCAAndExpired(t *testing.T) {
 	pki, other := newTestPKI(t), newTestPKI(t)
 	tlsCfg := scenario.TLS{CAPEM: string(pki.pem), ServerName: testServerName, HostnameVerification: "cn-fallback"}
-	connectAll(t, other.issue(t, cnLeaf("*.region-1.prod.example.net")), tlsCfg, func(t *testing.T, err error) {
+	connectAll(t, other.issue(t, cnLeaf("*.zone-a.example.net")), tlsCfg, func(t *testing.T, err error) {
 		var ce *ChainError
 		var ua x509.UnknownAuthorityError
 		if !errors.As(err, &ce) || !errors.As(err, &ua) {
 			t.Fatalf("error = %v, want ChainError wrapping UnknownAuthorityError", err)
 		}
 	})
-	expired := cnLeaf("*.region-1.prod.example.net")
+	expired := cnLeaf("*.zone-a.example.net")
 	expired.NotBefore, expired.NotAfter = time.Now().Add(-2*time.Hour), time.Now().Add(-time.Hour)
 	connectAll(t, pki.issue(t, expired), tlsCfg, func(t *testing.T, err error) {
 		var ce *ChainError
@@ -234,20 +234,20 @@ func TestCNFallbackRejectsWrongCAAndExpired(t *testing.T) {
 
 func TestCNFallbackIgnoresUnrelatedIntermediates(t *testing.T) {
 	pki, other := newTestPKI(t), newTestPKI(t)
-	cert := pki.issue(t, cnLeaf("*.region-1.prod.example.net"))
+	cert := pki.issue(t, cnLeaf("*.zone-a.example.net"))
 	cert.Certificate = append(cert.Certificate, other.der)
 	connectAll(t, cert, scenario.TLS{CAPEM: string(pki.pem), ServerName: testServerName, HostnameVerification: "cn-fallback"}, func(t *testing.T, err error) { wantOK(t, err) })
 }
 
 func TestHostnameVerificationNoneChecksChainOnly(t *testing.T) {
 	pki, other := newTestPKI(t), newTestPKI(t)
-	connectAll(t, pki.issue(t, cnLeaf("*.region-1.prod.example.net")), scenario.TLS{CAPEM: string(pki.pem), ServerName: "anything.invalid", HostnameVerification: "none"}, func(t *testing.T, err error) { wantOK(t, err) })
-	connectAll(t, other.issue(t, cnLeaf("*.region-1.prod.example.net")), scenario.TLS{CAPEM: string(pki.pem), ServerName: "anything.invalid", HostnameVerification: "none"}, wantAs[*ChainError](t))
+	connectAll(t, pki.issue(t, cnLeaf("*.zone-a.example.net")), scenario.TLS{CAPEM: string(pki.pem), ServerName: "anything.invalid", HostnameVerification: "none"}, func(t *testing.T, err error) { wantOK(t, err) })
+	connectAll(t, other.issue(t, cnLeaf("*.zone-a.example.net")), scenario.TLS{CAPEM: string(pki.pem), ServerName: "anything.invalid", HostnameVerification: "none"}, wantAs[*ChainError](t))
 }
 
 func TestServerAuthUsageRequired(t *testing.T) {
 	pki := newTestPKI(t)
-	leaf := cnLeaf("*.region-1.prod.example.net")
+	leaf := cnLeaf("*.zone-a.example.net")
 	leaf.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
 	connectAll(t, pki.issue(t, leaf), scenario.TLS{CAPEM: string(pki.pem), ServerName: testServerName, HostnameVerification: "cn-fallback"}, wantAs[*ChainError](t))
 }
