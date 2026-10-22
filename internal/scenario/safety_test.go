@@ -158,7 +158,11 @@ func TestRenderCheckBound(t *testing.T) {
 	if err := s.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > 2*time.Second {
+	limit := 2 * time.Second
+	if raceEnabled {
+		limit = 10 * time.Second
+	}
+	if d := time.Since(start); d > limit {
 		t.Fatalf("render check took %s", d)
 	}
 }
