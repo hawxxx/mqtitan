@@ -1533,19 +1533,17 @@ function TestDetail({ id }: { id: string }) {
         </div>
       ))}
       <div className="tabs" role="tablist" aria-label="Test views">
-        {["Overview", "Latency", "Connections", "Thresholds", "Scenario"].map(
-          (x) => (
-            <button
-              className={tab === x ? "active" : ""}
-              key={x}
-              role="tab"
-              aria-selected={tab === x}
-              onClick={() => setTab(x)}
-            >
-              {x}
-            </button>
-          ),
-        )}
+        {["Overview", "Thresholds", "Scenario"].map((x) => (
+          <button
+            className={tab === x ? "active" : ""}
+            key={x}
+            role="tab"
+            aria-selected={tab === x}
+            onClick={() => setTab(x)}
+          >
+            {x}
+          </button>
+        ))}
         <span
           className={`stream ${stream}`}
           role="status"
@@ -1657,59 +1655,6 @@ function TestDetail({ id }: { id: string }) {
             />
           )}
         </section>
-      ) : tab === "Latency" ? (
-        <>
-          <ChartPanel metrics={metrics} field="p95" />
-          <LatencyPanel snapshot={s} />
-          <section className="panel side-panel">
-            <h2>Delivery telemetry</h2>
-            {[
-              ["Publish attempts", number(s.publishAttempts)],
-              ["Publish errors", number(s.publishErrors)],
-              ["Missed publish slots", number(s.publishSlotsMissed || 0)],
-              ["Clock-skewed correlations", number(s.correlationRejected || 0)],
-              ["Bytes sent", bytes(s.bytesSent)],
-              ["Messages received", number(s.received)],
-              ["Bytes received", bytes(s.bytesReceived)],
-              ["P50 latency", latency(s.p50)],
-            ].map(([k, v]) => (
-              <div className="plan-row" key={k}>
-                <span>{k}</span>
-                <strong className="mono">{v}</strong>
-              </div>
-            ))}
-          </section>
-        </>
-      ) : tab === "Connections" ? (
-        <>
-          <ChartPanel metrics={metrics} field="connected" />
-          <div className="two-col">
-            <section className="panel side-panel">
-              <h2>Connection telemetry</h2>
-              {[
-                ["Attempts", s.connectAttempts],
-                ["Connected", s.connected],
-                ["Connecting", s.connecting],
-                ["Errors", s.connectErrors],
-                ["Reconnects", s.reconnects || 0],
-                ["Churned", s.churned || 0],
-                ["Churn reconnects", s.churnReconnects || 0],
-                ["Subscriptions", s.subscriptions || 0],
-              ].map(([k, v]) => (
-                <div className="plan-row" key={k}>
-                  <span>{k}</span>
-                  <strong className="mono">{number(Number(v))}</strong>
-                </div>
-              ))}
-            </section>
-            <ConnectFailures
-              failures={s.connectFailures}
-              connack={s.connackReasons}
-            />
-          </div>
-          <AddressDistribution snapshot={s} samples={metrics.data || []} />
-          <BalancePanel balance={t.balance || liveBalance(brokers.data)} />
-        </>
       ) : (
         <>
           {t.thresholds?.length > 0 && (
@@ -1740,6 +1685,54 @@ function TestDetail({ id }: { id: string }) {
             <ChartPanel metrics={metrics} field="connected" />
             <ChartPanel metrics={metrics} field="p95" />
             <ChartPanel metrics={metrics} field="byteRate" />
+          </div>
+          <LatencyPanel snapshot={s} />
+          <AddressDistribution snapshot={s} samples={metrics.data || []} />
+          <BalancePanel balance={t.balance || liveBalance(brokers.data)} />
+          <div className="two-col">
+            <section className="panel side-panel">
+              <h2>Connection telemetry</h2>
+              {[
+                ["Attempts", s.connectAttempts],
+                ["Connected", s.connected],
+                ["Connecting", s.connecting],
+                ["Errors", s.connectErrors],
+                ["Reconnects", s.reconnects || 0],
+                ["Churned", s.churned || 0],
+                ["Churn reconnects", s.churnReconnects || 0],
+                ["Subscriptions", s.subscriptions || 0],
+              ].map(([k, v]) => (
+                <div className="plan-row" key={k}>
+                  <span>{k}</span>
+                  <strong className="mono">{number(Number(v))}</strong>
+                </div>
+              ))}
+            </section>
+            <ConnectFailures
+              failures={s.connectFailures}
+              connack={s.connackReasons}
+            />
+            <section className="panel side-panel">
+              <h2>Delivery telemetry</h2>
+              {[
+                ["Publish attempts", number(s.publishAttempts)],
+                ["Publish errors", number(s.publishErrors)],
+                ["Missed publish slots", number(s.publishSlotsMissed || 0)],
+                [
+                  "Clock-skewed correlations",
+                  number(s.correlationRejected || 0),
+                ],
+                ["Bytes sent", bytes(s.bytesSent)],
+                ["Messages received", number(s.received)],
+                ["Bytes received", bytes(s.bytesReceived)],
+                ["P50 latency", latency(s.p50)],
+              ].map(([k, v]) => (
+                <div className="plan-row" key={k}>
+                  <span>{k}</span>
+                  <strong className="mono">{v}</strong>
+                </div>
+              ))}
+            </section>
           </div>
           <RunConsole
             startedAt={t.startedAt}
