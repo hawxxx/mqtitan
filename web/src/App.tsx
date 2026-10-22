@@ -2205,7 +2205,10 @@ function Shell() {
             <Layers size={25} />
           </div>
           <span>
-            MQ<span className="brand-accent">Titan</span>
+            <span className="brand-accent">MQT</span>
+            <span className="brand-silver">i</span>
+            <span className="brand-accent">T</span>
+            <span className="brand-silver">an</span>
             <small>PERFORMANCE LAB</small>
           </span>
         </Link>
