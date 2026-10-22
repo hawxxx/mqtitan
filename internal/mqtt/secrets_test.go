@@ -101,3 +101,20 @@ func TestTLSConfigStrictSecretsRefuses(t *testing.T) {
 		t.Fatalf("log: %s", buf.String())
 	}
 }
+
+func TestTLSConfigErrorsHaveNoDirectory(t *testing.T) {
+	dir := t.TempDir()
+	_, err := TLSConfig(scenario.TLS{CertFile: filepath.Join(dir, "c.crt"), KeyFile: filepath.Join(dir, "c.key")}, false)
+	if err == nil || strings.Contains(err.Error(), dir) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestStrictRefusesKeyInGitWorkTree(t *testing.T) {
+	root := t.TempDir()
+	_ = os.Mkdir(filepath.Join(root, ".git"), 0o700)
+	_, err := TLSConfig(keyAt(t, root, 0o600), true)
+	if err == nil || !strings.HasPrefix(err.Error(), "refusing key file client.key: file is inside a git work tree") || !strings.HasSuffix(err.Error(), "(safety.strictSecrets)") {
+		t.Fatalf("got %v", err)
+	}
+}

@@ -188,7 +188,7 @@ func TestValidateStrictSecretsFailsOnWideKey(t *testing.T) {
 	}
 	var out bytes.Buffer
 	err := validateCommand(&out, []string{"--", path})
-	if err == nil || !strings.Contains(err.Error(), "strictSecrets") || !strings.Contains(out.String(), "WARN  secrets  client.key: permissions 0644") || strings.Contains(out.String(), dir) {
+	if err == nil || err.Error() != "refusing key file client.key: permissions 0644 are wider than 0600 (safety.strictSecrets)" || !strings.Contains(out.String(), "WARN  secrets  client.key: permissions 0644") || strings.Contains(out.String(), dir) {
 		t.Fatalf("err=%v out=%s", err, out.String())
 	}
 }
@@ -210,5 +210,41 @@ func TestPlanCommandFlags(t *testing.T) {
 	}
 	if !strings.Contains(one.String(), "source ports") || strings.Contains(two.String(), "source ports") {
 		t.Fatalf("workers flag ignored:\n%s\n---\n%s", one.String(), two.String())
+	}
+}
+
+func TestValidateStrictScopeIsKeyFileOnly(t *testing.T) {
+	root := t.TempDir()
+	_ = os.Mkdir(filepath.Join(root, ".git"), 0o700)
+	ca := filepath.Join(root, "ca.pem")
+	if err := os.WriteFile(ca, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	other := t.TempDir()
+	key := filepath.Join(other, "client.key")
+	if err := os.WriteFile(key, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	write := func(tls string) string {
+		y := strings.Replace(cliScenario, "tls: {hostnameVerification: cn-fallback}", "tls: {"+tls+"}", 1)
+		y = strings.Replace(y, "safety: {", "safety: {strictSecrets: true, ", 1)
+		p := filepath.Join(t.TempDir(), "s.yaml")
+		if err := os.WriteFile(p, []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	var out bytes.Buffer
+	if err := validateCommand(&out, []string{write("caFile: " + ca)}); err != nil || !strings.Contains(out.String(), "WARN  secrets  ca.pem: file is inside a git work tree") || !strings.Contains(out.String(), "VALID cli") {
+		t.Fatalf("ca: err=%v out=%s", err, out.String())
+	}
+	gitKey := filepath.Join(root, "client.key")
+	if err := os.WriteFile(gitKey, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	err := validateCommand(&out, []string{write("certFile: " + gitKey + ", keyFile: " + gitKey)})
+	if err == nil || !strings.HasPrefix(err.Error(), "refusing key file client.key: file is inside a git work tree") || !strings.HasSuffix(err.Error(), "(safety.strictSecrets)") {
+		t.Fatalf("key: %v", err)
 	}
 }

@@ -181,15 +181,15 @@ func validateCommand(w io.Writer, args []string) error {
 	for _, msg := range s.Plan().Warnings {
 		fmt.Fprintf(w, "WARN  workload             %s\n", msg)
 	}
-	var strict error
 	for _, finding := range mqtt.CheckSecretFiles(s.Broker.TLS) {
 		fmt.Fprintf(w, "WARN  secrets  %s: %s\n", finding.File, finding.Problem)
-		if strict == nil && s.Safety.StrictSecrets && !strings.HasPrefix(finding.Problem, "file not found") {
-			strict = fmt.Errorf("refusing %s: %s (safety.strictSecrets)", finding.File, finding.Problem)
-		}
 	}
-	if strict != nil {
-		return strict
+	if s.Safety.StrictSecrets && s.Broker.TLS.KeyFile != "" {
+		for _, finding := range mqtt.CheckSecretFiles(scenario.TLS{KeyFile: s.Broker.TLS.KeyFile}) {
+			if !strings.HasPrefix(finding.Problem, "file not found") {
+				return fmt.Errorf("refusing key file %s: %s (safety.strictSecrets)", finding.File, finding.Problem)
+			}
+		}
 	}
 	fmt.Fprintf(w, "VALID %s\n", s.Name)
 	return nil

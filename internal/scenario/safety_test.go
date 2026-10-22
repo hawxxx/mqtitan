@@ -47,7 +47,7 @@ func TestForbiddenPrefixHashSuffixNormalised(t *testing.T) {
 }
 
 func TestForbiddenPrefixWildcardFilters(t *testing.T) {
-	for _, f := range []string{"#", "+/fleet/x", "s1/+/#", "$share/g/s1/fleet/a"} {
+	for _, f := range []string{"#", "+/fleet/x", "s1/+/#", "$share/g/s1/fleet/a", "$queue/s1/fleet/#"} {
 		s := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{"s1/fleet/"}}, "c-${sequence}", subTopic(f))
 		if err := s.Validate(); err == nil {
 			t.Fatalf("%q accepted", f)
@@ -78,6 +78,8 @@ func TestFilterOverlapsPrefix(t *testing.T) {
 		{"s2/#", "s1/fleet/", false},
 		{"$share/g/s1/fleet/a", "s1/fleet/", true},
 		{"$share/g/s2/a", "s1/fleet/", false},
+		{"$queue/s1/fleet/#", "s1/fleet/", true},
+		{"$queue/s2/#", "s1/fleet/", false},
 	} {
 		if got := filterOverlapsPrefix(tt.filter, tt.prefix); got != tt.want {
 			t.Errorf("filterOverlapsPrefix(%q, %q) = %v, want %v", tt.filter, tt.prefix, got, tt.want)
@@ -237,6 +239,20 @@ func TestRendererMatchesEngineExpansion(t *testing.T) {
 					t.Errorf("%q worker %q seq %d: got %q want %q", tpl, worker, seq, got, want)
 				}
 			}
+		}
+	}
+}
+
+func TestForbiddenPrefixMustBeLiteral(t *testing.T) {
+	for _, p := range []string{"s1/+/telemetry/", "s1/#/x", "+", "", "#", "s1/\x00", "s1/a#"} {
+		err := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{p}}, "c-${sequence}").Validate()
+		if err == nil || !strings.Contains(err.Error(), "safety.forbiddenTopicPrefixes[0] must be a literal topic prefix (wildcards are not allowed)") {
+			t.Errorf("%q: %v", p, err)
+		}
+	}
+	for _, p := range []string{"s1/", "s1/#", "s1"} {
+		if err := safetyScenario(Safety{ForbiddenTopicPrefixes: []string{p}}, "c-${sequence}").Validate(); err != nil {
+			t.Errorf("%q: %v", p, err)
 		}
 	}
 }

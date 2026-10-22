@@ -32,10 +32,19 @@ func normalisePrefix(p string) string {
 	return p
 }
 
+// literalPrefix accepts a non-empty prefix with no "+", no NUL and no "#"
+// other than one trailing "#" level.
+func literalPrefix(p string) bool {
+	if p == "#" || strings.HasSuffix(p, "/#") {
+		p = strings.TrimSuffix(p, "#")
+	}
+	return p != "" && p != "/" && !strings.ContainsAny(p, "+#\x00")
+}
+
 func (sf Safety) prefixes() []string {
 	out := make([]string, 0, len(sf.ForbiddenTopicPrefixes))
 	for _, p := range sf.ForbiddenTopicPrefixes {
-		if n := normalisePrefix(p); n != "" {
+		if n := normalisePrefix(p); literalPrefix(p) {
 			out = append(out, n)
 		}
 	}
@@ -47,8 +56,8 @@ func (sf Safety) prefixes() []string {
 func (sf Safety) check(s Scenario) []string {
 	var problems []string
 	for i, p := range sf.ForbiddenTopicPrefixes {
-		if normalisePrefix(p) == "" {
-			problems = append(problems, fmt.Sprintf("safety.forbiddenTopicPrefixes[%d] must not be empty", i))
+		if !literalPrefix(p) {
+			problems = append(problems, fmt.Sprintf("safety.forbiddenTopicPrefixes[%d] must be a literal topic prefix (wildcards are not allowed)", i))
 		}
 	}
 	if sf.ClientIDDenyRegex != "" {
@@ -76,7 +85,9 @@ func overlapsAny(topic string, prefixes []string) (string, bool) {
 // filterOverlapsPrefix reports whether a topic or filter can match any topic
 // under prefix (which ends in "/").
 func filterOverlapsPrefix(filter, prefix string) bool {
-	if strings.HasPrefix(filter, "$share/") {
+	if strings.HasPrefix(filter, "$queue/") {
+		filter = strings.TrimPrefix(filter, "$queue/")
+	} else if strings.HasPrefix(filter, "$share/") {
 		rest := strings.SplitN(filter, "/", 3)
 		if len(rest) < 3 {
 			return false

@@ -63,7 +63,7 @@ func TLSConfig(s scenario.TLS, strict bool) (*tls.Config, error) {
 		}
 		cert, err := tls.LoadX509KeyPair(s.CertFile, s.KeyFile)
 		if err != nil {
-			return nil, fmt.Errorf("TLS client certificate: %w", err)
+			return nil, errors.New("TLS client certificate or key cannot be loaded")
 		}
 		c.Certificates = []tls.Certificate{cert}
 	}
