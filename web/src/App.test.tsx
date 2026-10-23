@@ -1,9 +1,11 @@
-import { it, expect, afterEach, vi } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { it, expect, afterEach, beforeEach, vi } from "vitest";
+import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   Dashboard,
   Wizard,
+  Workers,
+  WorkerPicker,
   Brokers,
   ScenarioEditor,
   BrokerTelemetry,
@@ -12,9 +14,33 @@ import {
 } from "./App";
 import userEvent from "@testing-library/user-event";
 import { parse } from "yaml";
+// Reduced motion keeps a short fade, so wizard callbacks still arrive async.
+const motion = (reduce: boolean) =>
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: reduce && query.includes("reduce"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }));
+beforeEach(() => motion(true));
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+it("plays the wizard exit animation before closing", async () => {
+  motion(false);
+  const close = vi.fn();
+  const { container } = render(<Wizard done={() => {}} close={close} />);
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(
+    container.ownerDocument.querySelector(".modal-backdrop.leaving"),
+  ).not.toBeNull();
+  expect(close).not.toHaveBeenCalled();
+  await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
 });
 it("lets the wizard select a certificate profile for secure WebSocket tests", async () => {
   vi.stubGlobal(
@@ -62,6 +88,7 @@ it("lets the wizard select a certificate profile for secure WebSocket tests", as
   await userEvent.click(
     screen.getByRole("button", { name: "Review scenario" }),
   );
+  await waitFor(() => expect(output).not.toBe(""));
   expect(parse(output).broker.tls).toEqual({
     profile: "saved-tls-profile",
     serverName: "mqtt.example.com",
@@ -74,9 +101,7 @@ it("shows an honest empty dashboard when there are no recorded runs", () => {
       <Dashboard tests={[]} open={() => {}} create={() => {}} />
     </QueryClientProvider>,
   );
-  expect(
-    screen.getByText("Your performance baseline starts here"),
-  ).toBeTruthy();
+  expect(screen.getByText("No tests yet")).toBeTruthy();
   expect(screen.queryByText("12,480")).toBeNull();
 });
 it("creates a scenario from wizard inputs and presents YAML for review", async () => {
@@ -92,6 +117,7 @@ it("creates a scenario from wizard inputs and presents YAML for review", async (
   await userEvent.click(
     screen.getByRole("button", { name: "Review scenario" }),
   );
+  await waitFor(() => expect(output).not.toBe(""));
   expect(output).toContain("mqtitan.io/v1alpha1");
   expect(output).toContain("mqtt://localhost:1883");
 });
@@ -184,15 +210,14 @@ it("shows actual EMQX connection and delivery metrics when configured", async ()
     globalThis.fetch = original;
   }
 });
-it("closes the wizard on Escape and records MQTT version and payload size", async () => {
+it("records MQTT version and payload size from the wizard", async () => {
   let output = "";
-  const close = vi.fn();
   render(
     <Wizard
       done={(s) => {
         output = s;
       }}
-      close={close}
+      close={() => {}}
     />,
   );
   await userEvent.selectOptions(screen.getByLabelText("MQTT version"), "5");
@@ -202,11 +227,16 @@ it("closes the wizard on Escape and records MQTT version and payload size", asyn
   await userEvent.click(
     screen.getByRole("button", { name: "Review scenario" }),
   );
+  await waitFor(() => expect(output).not.toBe(""));
   const doc = parse(output);
   expect(doc.broker.version).toBe("5");
   expect(doc.workloads[0].payload.size).toBe(1024);
+});
+it("closes the wizard on Escape", async () => {
+  const close = vi.fn();
+  render(<Wizard done={() => {}} close={close} />);
   await userEvent.keyboard("{Escape}");
-  expect(close).toHaveBeenCalled();
+  await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
 });
 it("moves focus into the wizard and keeps Tab inside it", async () => {
   const opener = document.createElement("button");
@@ -214,13 +244,15 @@ it("moves focus into the wizard and keeps Tab inside it", async () => {
   opener.focus();
   const { unmount } = render(<Wizard done={() => {}} close={() => {}} />);
   const dialog = screen.getByRole("dialog");
-  expect(dialog.contains(document.activeElement)).toBe(true);
+  expect(document.activeElement).toBe(screen.getByLabelText("Test name"));
+  expect(document.body.style.overflow).toBe("hidden");
   for (let i = 0; i < 30; i++) {
     await userEvent.tab();
     expect(dialog.contains(document.activeElement)).toBe(true);
   }
   unmount();
   expect(document.activeElement).toBe(opener);
+  expect(document.body.style.overflow).toBe("");
   opener.remove();
 });
 
@@ -244,4 +276,91 @@ it("names the top connect failure stage", () => {
   expect(topConnectFailure({ tcp: 1, tls_alert: 4 })).toBe("tls_alert 4");
   expect(topConnectFailure({ tcp: 0 })).toBe("");
   expect(topConnectFailure(undefined)).toBe("");
+});
+
+const fleet = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    id: `worker-${String(i).padStart(2, "0")}`,
+    status: i % 10 === 0 ? "lost" : "ready",
+    cpuCount: 8,
+    memoryBytes: 1 << 20,
+    connected: 100,
+    lastSeen: "2026-01-01T00:00:00Z",
+    clockOffsetMs: 0,
+    host: {
+      os: i < 20 ? "linux" : "darwin",
+      arch: "arm64",
+      cpus: 8,
+      goVersion: "go1",
+      startedAt: "2026-01-01T00:00:00Z",
+    },
+  }));
+it("pages, searches and filters a large worker fleet", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async (input: RequestInfo | URL) =>
+        new Response(
+          JSON.stringify({
+            data: String(input).includes("/workers") ? fleet(30) : [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    ),
+  );
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <Workers />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("1–12 of 30")).toBeTruthy();
+  expect(
+    screen.getAllByRole("heading", { level: 2, name: /^worker-/ }),
+  ).toHaveLength(12);
+  const summary = screen.getByLabelText("Fleet summary");
+  expect(summary.textContent).toContain("30");
+  expect(summary.textContent).toContain("240");
+  await userEvent.click(screen.getByRole("button", { name: "Next" }));
+  await userEvent.click(screen.getByRole("button", { name: "Next" }));
+  expect(screen.getByText("25–30 of 30")).toBeTruthy();
+  await userEvent.selectOptions(
+    screen.getByLabelText("Filter workers by status"),
+    "lost",
+  );
+  expect(
+    screen.getAllByRole("heading", { level: 2, name: /^worker-/ }),
+  ).toHaveLength(3);
+  await userEvent.type(screen.getByLabelText("Search workers"), "zzz");
+  expect(screen.getByText("No workers match this filter.")).toBeTruthy();
+});
+it("selects ready workers in bulk from the scenario worker picker", async () => {
+  const workers = fleet(10);
+  let selected: string[] = [];
+  const { rerender } = render(
+    <WorkerPicker
+      workers={workers}
+      selected={selected}
+      onChange={(ids) => (selected = ids)}
+      query=""
+      onQuery={() => {}}
+    />,
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Select all ready" }),
+  );
+  expect(selected).toHaveLength(9);
+  expect(selected).not.toContain("worker-00");
+  rerender(
+    <WorkerPicker
+      workers={workers}
+      selected={selected}
+      onChange={() => {}}
+      query="darwin"
+      onQuery={() => {}}
+    />,
+  );
+  expect(screen.queryByLabelText("worker-05")).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Select matching ready" }),
+  ).toBeTruthy();
 });

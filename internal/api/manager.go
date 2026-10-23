@@ -70,7 +70,11 @@ type execution struct {
 	peakConnected int64
 	lostWorkers   []string
 	// Guarded by Manager.mu.
-	brokers []emqx.FleetSample
+	brokers    []emqx.FleetSample
+	events     []LogEvent
+	seq        int
+	stage      int
+	lastBroker *emqx.FleetSample
 }
 type Manager struct {
 	store          *storage.Store
@@ -111,6 +115,7 @@ func NewManager(store *storage.Store) (*Manager, error) {
 				cancel()
 				return nil, err
 			}
+			noteInterrupted(store, t.ID, now)
 		}
 	}
 	m.workers = newWorkerRegistry()
@@ -175,6 +180,9 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 			return Test{}, err
 		}
 	}
+	if err = s.ResolveRun(); err != nil {
+		return Test{}, err
+	}
 	s, err = m.resolveCertificates(s)
 	if err != nil {
 		return Test{}, err
@@ -198,7 +206,7 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 	copy(ids, workerIDs)
 	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, SourceTestID: sourceTestID}
 	counters := metrics.New()
-	r := &execution{fromAPI: fromAPI, ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot}
+	r := &execution{fromAPI: fromAPI, ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot, stage: -1}
 	if len(workerIDs) > 0 {
 		if err := m.assign(r, s, workerIDs); err != nil {
 			cancel()
@@ -212,6 +220,9 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 		return Test{}, err
 	}
 	m.runs[t.ID] = r
+	m.logEvent(r, "info", "%s", startMessage(s, ids))
+	r.stage = 0
+	m.logEvent(r, "info", "%s", stageMessage(s.Stages, 0))
 	m.wg.Add(1)
 	go m.execute(ctx, r, s, baseline)
 	return publicTest(t), nil
@@ -239,6 +250,8 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 	last := r.snapshot()
 	lastTime := time.Now()
 	lastCompact := time.Now()
+	var lastEventSeq int
+	var lastEventAt time.Time
 	record := func() {
 		now := time.Now().UTC()
 		snap := r.snapshot()
@@ -253,6 +266,11 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 		m.mu.Lock()
 		r.test.Snapshot = snap
 		m.notify(r, Event{"metrics", sample})
+		// Live load control replaces the stage plan, so stop announcing stages.
+		if i := stageAt(s.Stages, now.Sub(r.test.StartedAt)); i >= 0 && i != r.stage && (r.test.LoadControl == nil || !r.test.LoadControl.Manual) {
+			r.stage = i
+			m.logEvent(r, "info", "%s", stageMessage(s.Stages, i))
+		}
 		t := r.test
 		if err := m.persist(t); err != nil {
 			slog.Error("test persistence failed", "test", t.ID)
@@ -269,6 +287,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 		select {
 		case <-ticker.C:
 			record()
+			m.flushEvents(r, &lastEventSeq, &lastEventAt)
 		case err := <-done:
 			record()
 			stopTelemetry()
@@ -309,12 +328,29 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			if thresholdErr != nil {
 				r.test.Error = thresholdErr.Error()
 			}
+			for _, res := range results {
+				level, verdict := "info", "passed"
+				if !res.Passed {
+					level, verdict = "error", "failed"
+				}
+				m.logEvent(r, level, "Threshold %s %s: observed %s, required %s", res.Name, verdict, res.Observed, res.Expression)
+			}
+			level := map[string]string{"completed": "info", "stopped": "warn"}[r.test.Status]
+			if level == "" {
+				level = "error"
+			}
+			ended := "Test " + r.test.Status
+			if r.test.Error != "" {
+				ended += ": " + r.test.Error
+			}
+			m.logEvent(r, level, "%s", ended)
 			t := r.test
 			m.notify(r, Event{"status", publicTest(t)})
 			m.mu.Unlock()
 			if err := m.persist(t); err != nil {
 				slog.Error("final persistence failed", "test", t.ID)
 			}
+			m.persistEvents(r)
 			m.releaseAssignments(r)
 			m.mu.Lock()
 			delete(m.runs, t.ID)
@@ -408,7 +444,8 @@ func (m *Manager) Subscribe(id string) (<-chan Event, func(), error) {
 	if len(r.subscribers) >= 128 {
 		return nil, nil, errors.New("live stream subscriber limit reached")
 	}
-	ch := make(chan Event, 1)
+	// Room for bursts, so a log line is not displaced by the next metrics tick.
+	ch := make(chan Event, 16)
 	r.subscribers[ch] = struct{}{}
 	ch <- Event{"status", publicTest(r.test)}
 	return ch, func() { m.mu.Lock(); delete(r.subscribers, ch); m.mu.Unlock() }, nil

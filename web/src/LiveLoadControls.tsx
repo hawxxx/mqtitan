@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { LoadSlider } from "./LoadSlider";
 import { number, request, type Test } from "./model";
+import { clock, useTimeZone } from "./timezone";
 
 export function LiveLoadControls({
   test,
@@ -16,6 +17,7 @@ export function LiveLoadControls({
   test: Test;
   onUpdated: (test: Test) => void;
 }) {
+  const zone = useTimeZone();
   const control = test.loadControl!;
   const target = control.manual ? control.clients : test.snapshot.targetClients;
   const [clients, setClients] = useState(target);
@@ -310,7 +312,9 @@ export function LiveLoadControls({
               .reverse()
               .map((change) => (
                 <li key={change.revision}>
-                  <time>{new Date(change.timestamp).toLocaleTimeString()}</time>
+                  <time dateTime={change.timestamp}>
+                    {clock(Date.parse(change.timestamp), zone).slice(0, 8)}
+                  </time>
                   <span>#{change.revision}</span>
                   <strong>{number(change.clients)} clients</strong>
                   <span>{number(change.ratePerClient)} msg/publisher/sec</span>

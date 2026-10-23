@@ -370,10 +370,6 @@ nav a.active:before {
   align-items: center;
   gap: 8px;
 }
-.topbar-new {
-  padding: 7px 11px;
-  font-size: 12px;
-}
 main {
   padding: 32px 36px 40px;
   max-width: 1700px;
@@ -800,6 +796,18 @@ tbody tr:hover {
 .badge.warn i {
   background: var(--amber);
 }
+/* Neutral states (info, disabled, pending) get a muted dot, not success teal. */
+.badge i {
+  background: var(--muted);
+}
+.badge.running i,
+.badge.active i,
+.badge.online i,
+.badge.passed i,
+.badge.ok i,
+.badge.completed i {
+  background: var(--teal);
+}
 .help-strip {
   display: flex;
   gap: 13px;
@@ -1192,9 +1200,6 @@ textarea:focus {
   background: var(--bg);
   color: var(--text);
 }
-[data-theme="light"] .badge {
-  color: #34755c;
-}
 [data-theme="light"] .editor textarea,
 [data-theme="light"] .yaml-read {
   color: #226e5b;
@@ -1217,6 +1222,7 @@ textarea:focus {
 [data-theme="light"] .badge.ok,
 [data-theme="light"] .badge.passed,
 [data-theme="light"] .badge.active {
+  color: #34755c;
   background: #e0f3e9;
   border-color: #b7d9c7;
 }
@@ -1346,9 +1352,6 @@ textarea:focus {
     flex-wrap: wrap;
     gap: 15px;
   }
-  .topbar-new .label {
-    display: none;
-  }
   .two-col {
     gap: 16px;
   }
@@ -1366,7 +1369,8 @@ textarea:focus {
   .topbar {
     padding: 0 15px;
   }
-  .breadcrumb strong {
+  .breadcrumb strong,
+  .breadcrumb svg {
     display: none;
   }
   .topbar-actions {
@@ -1496,12 +1500,6 @@ textarea:focus {
   border-radius: 4px;
   color: var(--text);
 }
-.worker-choice input {
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  accent-color: var(--teal);
-}
 .worker-choice small {
   display: block;
   font-size: 10px;
@@ -1628,6 +1626,13 @@ textarea:focus {
 .tls-upload {
   border-top: 1px solid var(--line);
   padding-top: 14px;
+  margin-top: 14px;
+}
+.tls-upload-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
   margin-top: 14px;
 }
 .tls-profile-details {
@@ -2053,7 +2058,7 @@ textarea:focus {
   display: flex;
   flex-direction: column;
 }
-.editor-layout > .editor textarea {
+.editor-layout > .editor .yaml-editor {
   flex: 1;
 }
 .compare-when {
@@ -2129,6 +2134,1357 @@ textarea:focus {
   color: var(--muted);
   font-size: 11px;
 }
-.balance-tiles{display:flex;gap:1.5rem;flex-wrap:wrap;margin:.5rem 0}
-.balance-row{display:grid;grid-template-columns:minmax(6rem,12rem) 1fr 5rem;gap:.75rem;align-items:center}
-.balance-row progress{width:100%}
+.balance-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 23px;
+}
+.balance-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.balance-stat span {
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.balance-stat strong {
+  font: 500 14px "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.balance-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.balance-zones-missing {
+  padding: 0 23px 16px;
+}
+.balance-panel .notice {
+  margin: 16px 23px 0;
+}
+.balance-panel .address-table {
+  padding-bottom: 12px;
+}
+.balance-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, 12rem) 1fr 6rem;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 23px;
+  font-size: 12px;
+}
+.balance-row > span:last-child {
+  text-align: right;
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.balance-row .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.balance-row progress {
+  width: 100%;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.balance-row progress::-webkit-progress-bar {
+  background: transparent;
+}
+.balance-row progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--teal) 60%, transparent), var(--teal));
+  transition: inline-size 400ms var(--ease-out);
+}
+.balance-row progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--teal);
+}
+/* Glass surfaces and motion. Frosted panels float over a slow ambient glow;
+   reduced-motion users get the static glass without animation (see above). */
+:root {
+  --glass: color-mix(in srgb, var(--panel) 58%, transparent);
+  --glass-strong: color-mix(in srgb, var(--panel) 80%, transparent);
+  --glass-border: color-mix(in srgb, #fff 9%, transparent);
+  --glass-edge: inset 0 1px 0 color-mix(in srgb, #fff 7%, transparent);
+  --glass-shadow: 0 18px 40px -24px #000c;
+  --glass-blur: blur(18px) saturate(150%);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --orb-opacity: 0.42;
+}
+[data-theme="light"] {
+  --glass: color-mix(in srgb, #fff 56%, transparent);
+  --glass-strong: color-mix(in srgb, #fff 82%, transparent);
+  --glass-border: color-mix(in srgb, #fff 75%, var(--line));
+  --glass-edge: inset 0 1px 0 #fffc;
+  --glass-shadow: 0 18px 40px -26px #1d3a4566;
+  --orb-opacity: 0.38;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root,
+  [data-theme="light"] {
+    --glass: var(--panel);
+    --glass-strong: var(--panel);
+  }
+}
+body {
+  background: var(--bg);
+}
+.app-shell {
+  position: relative;
+  isolation: isolate;
+}
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ambient i {
+  position: absolute;
+  width: 46vmax;
+  height: 46vmax;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: var(--orb-opacity);
+  animation: orb-drift 32s var(--ease-out) infinite alternate;
+}
+.ambient i:nth-child(1) {
+  top: -18vmax;
+  left: 4vmax;
+  background: radial-gradient(circle, var(--teal), transparent 68%);
+}
+.ambient i:nth-child(2) {
+  right: -16vmax;
+  top: 18vh;
+  background: radial-gradient(circle, #3a7bd5, transparent 68%);
+  opacity: calc(var(--orb-opacity) * 0.7);
+  animation-duration: 40s;
+  animation-delay: -12s;
+}
+.ambient i:nth-child(3) {
+  bottom: -24vmax;
+  left: 34vw;
+  background: radial-gradient(circle, var(--amber), transparent 68%);
+  opacity: calc(var(--orb-opacity) * 0.45);
+  animation-duration: 46s;
+  animation-delay: -24s;
+}
+@keyframes orb-drift {
+  to {
+    transform: translate3d(6vmax, 4vmax, 0) scale(1.12);
+  }
+}
+.sidebar,
+.topbar,
+.panel,
+.metrics,
+.dashboard-intro,
+.modal {
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.sidebar {
+  background: var(--glass);
+  border-right-color: var(--glass-border);
+}
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  border-bottom-color: var(--glass-border);
+}
+.panel,
+.metrics {
+  position: relative;
+  background: var(--glass);
+  border-color: var(--glass-border);
+  border-radius: 14px;
+  box-shadow: var(--glass-edge), var(--glass-shadow);
+  transition:
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+.panel:hover,
+.metrics:hover {
+  border-color: color-mix(in srgb, var(--teal) 28%, var(--glass-border));
+}
+.panel-heading {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  border-bottom-color: var(--glass-border);
+}
+.panel-footer,
+.metric {
+  border-color: var(--glass-border);
+}
+thead {
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+}
+.dashboard-intro {
+  background: linear-gradient(
+    115deg,
+    color-mix(in srgb, var(--teal) 10%, var(--glass)),
+    var(--glass) 55%
+  );
+  border-color: var(--glass-border);
+  border-left-color: var(--teal);
+  border-radius: 16px;
+  box-shadow: var(--glass-edge), var(--glass-shadow);
+}
+/* Magic UI Border Beam. */
+.magic-border-beam {
+  position: absolute;
+  inset: 0;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  pointer-events: none;
+  mask:
+    linear-gradient(transparent, transparent) padding-box,
+    linear-gradient(#000, #000) border-box;
+  mask-composite: intersect;
+}
+.magic-border-beam > div {
+  position: absolute;
+  width: var(--beam-size);
+  aspect-ratio: 1;
+  background: linear-gradient(
+    to left,
+    var(--beam-from),
+    var(--beam-to),
+    transparent
+  );
+  offset-path: rect(0 auto auto 0 round var(--beam-size));
+  animation: border-beam var(--beam-duration) linear var(--beam-delay) infinite;
+}
+@keyframes border-beam {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+.workspace,
+.count,
+.estimate {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-color: var(--glass-border);
+}
+.workspace {
+  border-radius: 10px;
+  transition: background-color 200ms ease;
+}
+.workspace:hover {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+nav a {
+  border-radius: 9px;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 220ms var(--ease-out);
+}
+nav a:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  transform: translateX(2px);
+}
+nav a.active {
+  background: color-mix(in srgb, var(--teal) 16%, transparent);
+  border-color: color-mix(in srgb, var(--teal) 32%, transparent);
+  box-shadow:
+    inset 3px 0 0 var(--teal),
+    0 0 24px -10px var(--teal);
+}
+button {
+  border-radius: 8px;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    box-shadow 220ms ease,
+    transform 160ms var(--ease-out);
+}
+button:not(.primary, .text-button, .theme-button, .tabs button, .modal-heading button) {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-color: var(--glass-border);
+  box-shadow: var(--glass-edge);
+}
+button:not(.primary, .text-button, .theme-button, .tabs button, .modal-heading button):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+  border-color: color-mix(in srgb, var(--text) 20%, transparent);
+}
+button.primary {
+  box-shadow:
+    inset 0 1px 0 #fff5,
+    0 6px 20px -8px var(--teal);
+}
+button.primary:hover:not(:disabled) {
+  box-shadow:
+    inset 0 1px 0 #fff6,
+    0 10px 28px -8px var(--teal);
+  transform: translateY(-1px);
+}
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+input,
+select,
+textarea {
+  background: color-mix(in srgb, var(--field) 70%, transparent);
+  border-color: var(--glass-border);
+  border-radius: 8px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 200ms ease;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--teal) 16%, transparent);
+}
+.tabs {
+  border-bottom-color: var(--glass-border);
+}
+.tabs button {
+  border-bottom: 2px solid transparent;
+  transition:
+    color 160ms ease,
+    border-color 220ms var(--ease-out);
+}
+.tabs button:hover {
+  color: var(--text);
+}
+.badge {
+  border-radius: 999px;
+}
+footer {
+  border-top-color: var(--glass-border);
+}
+/* Live indicators breathe. */
+.engine-state i:not(.offline),
+.environment i,
+.nav-dot,
+.badge.running i {
+  animation: live-pulse 2.4s ease-out infinite;
+}
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--teal) 60%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+/* Route changes: Magic UI Blur Fade, staggered over the first sections.
+   Fill mode "backwards" leaves no transform or filter behind once settled,
+   so sticky headers and fixed overlays keep working. */
+.page-enter > * {
+  animation: blur-fade 520ms var(--ease-out) backwards;
+}
+.page-enter > :nth-child(2) {
+  animation-delay: 60ms;
+}
+.page-enter > :nth-child(3) {
+  animation-delay: 120ms;
+}
+.page-enter > :nth-child(4) {
+  animation-delay: 180ms;
+}
+.page-enter > :nth-child(n + 5) {
+  animation-delay: 240ms;
+}
+@keyframes blur-fade {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(6px);
+  }
+}
+.modal-backdrop {
+  background: color-mix(in srgb, #000 45%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(120%);
+  animation: fade-in 220ms ease backwards;
+}
+.modal {
+  background: var(--glass-strong);
+  border-color: var(--glass-border);
+  border-radius: 18px;
+  box-shadow:
+    var(--glass-edge),
+    0 30px 90px -20px #000a;
+  animation: modal-in 320ms var(--ease-out) backwards;
+}
+/* Opaque: a backdrop-filter nested in the glass modal does not blur the
+   fields scrolling beneath it, so they showed through the sticky footer. */
+.modal-footer {
+  background: var(--panel);
+  border-top-color: var(--glass-border);
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+/* YAML syntax colours, shared by the read-only view and the editor overlay. */
+:root {
+  --yaml-key: #76ddca;
+  --yaml-string: #e4b467;
+  --yaml-number: #c3a6ff;
+  --yaml-literal: #f29bbd;
+  --yaml-anchor: #8fb8ff;
+  --yaml-punct: #6f8791;
+  --yaml-comment: #6f8791;
+}
+[data-theme="light"] {
+  --yaml-key: #0b7a66;
+  --yaml-string: #8a5a12;
+  --yaml-number: #6b46c1;
+  --yaml-literal: #b0336b;
+  --yaml-anchor: #2f5fb3;
+  --yaml-punct: #8a9aa1;
+  --yaml-comment: #7a8d95;
+}
+.yaml-read,
+[data-theme="light"] .yaml-read {
+  color: var(--text);
+  tab-size: 2;
+}
+.yaml-key {
+  color: var(--yaml-key);
+}
+.yaml-string {
+  color: var(--yaml-string);
+}
+.yaml-number {
+  color: var(--yaml-number);
+}
+.yaml-literal {
+  color: var(--yaml-literal);
+}
+.yaml-anchor {
+  color: var(--yaml-anchor);
+}
+.yaml-punct {
+  color: var(--yaml-punct);
+}
+.yaml-comment {
+  color: var(--yaml-comment);
+  font-style: italic;
+}
+.yaml-editor {
+  display: grid;
+  background: color-mix(in srgb, var(--field) 70%, transparent);
+}
+.yaml-editor > pre,
+.panel .yaml-editor > textarea {
+  grid-area: 1 / 1;
+  margin: 0;
+  padding: 24px;
+  border: 0;
+  border-radius: 0;
+  font: 12px / 1.9 "IBM Plex Mono", monospace;
+  letter-spacing: 0;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.yaml-editor > pre {
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text);
+}
+.panel .yaml-editor > textarea {
+  position: relative;
+  min-height: 650px;
+  overflow: auto;
+  resize: vertical;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--teal);
+  box-shadow: none;
+}
+.yaml-editor > textarea::selection {
+  background: color-mix(in srgb, var(--teal) 30%, transparent);
+  color: transparent;
+}
+@media (max-width: 850px) {
+  .panel .yaml-editor > textarea {
+    min-height: 520px;
+  }
+}
+/* Broker address distribution: compact sub-sections inside one panel. */
+.address-table + .address-table,
+.address-stack-block + .address-table {
+  border-top: 1px solid var(--glass-border);
+}
+.address-table h3 {
+  padding: 16px 23px 10px;
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.address-table-scroll {
+  overflow-x: auto;
+}
+.address-table td.mono {
+  overflow-wrap: anywhere;
+}
+.address-stack-block {
+  padding: 4px 23px 16px;
+}
+.address-stack-block > p {
+  margin-top: 10px;
+  font-size: 11px;
+}
+/* Run log console. Each level has its own colour in both themes. */
+:root {
+  --log-success: #4fd8bd;
+  --log-info: #7cb7ff;
+  --log-action: #c3a6ff;
+  --log-warn: #f0bf6c;
+  --log-error: #ff8f84;
+  --log-debug: #7f939c;
+}
+[data-theme="light"] {
+  --log-success: #0b7a66;
+  --log-info: #1f5fc4;
+  --log-action: #6b46c1;
+  --log-warn: #8f5a0c;
+  --log-error: #b3261e;
+  --log-debug: #6b7f87;
+}
+.level-success {
+  --log: var(--log-success);
+}
+.level-info {
+  --log: var(--log-info);
+}
+.level-action {
+  --log: var(--log-action);
+}
+.level-warn {
+  --log: var(--log-warn);
+}
+.level-error {
+  --log: var(--log-error);
+}
+.level-debug {
+  --log: var(--log-debug);
+}
+.run-console-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px 10px 10px;
+}
+.run-console.open .run-console-bar {
+  border-bottom: 1px solid var(--glass-border);
+}
+.panel .run-console-toggle {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 6px 10px;
+  font-weight: 600;
+  color: var(--text);
+}
+.panel .run-console-toggle:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.run-console-chevron {
+  color: var(--muted);
+  transform: rotate(-90deg);
+  transition: transform 220ms var(--ease-out);
+}
+.run-console.open .run-console-chevron {
+  transform: none;
+}
+.run-console-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: live-pulse 2.4s ease-out infinite;
+}
+.run-console-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.panel .console-chip {
+  padding: 4px 9px;
+  border-radius: 999px;
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 0.8px;
+  gap: 5px;
+  color: var(--log, var(--muted));
+  border-color: color-mix(in srgb, var(--log, var(--muted)) 40%, transparent);
+  background: color-mix(in srgb, var(--log, var(--muted)) 12%, transparent);
+}
+.panel .console-chip[aria-pressed="false"] {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.run-console-body {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  max-height: 300px;
+  overflow: auto;
+  font: 12px / 1.7 "IBM Plex Mono", monospace;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  overscroll-behavior: contain;
+}
+.run-console-body li {
+  display: grid;
+  grid-template-columns: 92px 54px 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 1px 16px 1px 13px;
+  border-left: 3px solid color-mix(in srgb, var(--log) 70%, transparent);
+  animation: console-line 260ms var(--ease-out) backwards;
+}
+.run-console-body li:hover {
+  background: color-mix(in srgb, var(--log) 7%, transparent);
+}
+.run-console-body time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.console-level {
+  color: var(--log);
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.8px;
+}
+.console-message {
+  color: color-mix(in srgb, var(--log) 35%, var(--text));
+  overflow-wrap: anywhere;
+}
+.level-error .console-message,
+.level-warn .console-message {
+  color: color-mix(in srgb, var(--log) 70%, var(--text));
+}
+.level-debug .console-message {
+  color: var(--muted);
+}
+@keyframes console-line {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+.run-console-body li.console-day {
+  display: block;
+  margin: 6px 0 2px;
+  padding: 2px 16px;
+  border-left: 0;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  animation: none;
+}
+.run-console-body li.console-day:hover {
+  background: none;
+}
+.run-console-body time {
+  color: color-mix(in srgb, var(--text) 70%, var(--muted));
+}
+.console-elapsed {
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 560px) {
+  .run-console-body li {
+    grid-template-columns: 92px minmax(0, 1fr);
+  }
+  .console-level,
+  .console-elapsed {
+    display: none;
+  }
+}
+/* Themed checkbox: the native control renders as a bright white square on
+   the glass surfaces. */
+input[type="checkbox"] {
+  appearance: none;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text) 28%, transparent);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 200ms ease;
+}
+input[type="checkbox"]::after {
+  content: "";
+  width: 5px;
+  height: 9px;
+  margin-top: -2px;
+  border: solid var(--bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0);
+  transition: transform 180ms var(--ease-out);
+}
+input[type="checkbox"]:hover {
+  border-color: var(--teal);
+}
+input[type="checkbox"]:checked {
+  background: var(--teal);
+  border-color: var(--teal);
+  box-shadow: 0 0 12px -2px color-mix(in srgb, var(--teal) 60%, transparent);
+}
+input[type="checkbox"]:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.worker-choice {
+  border-color: var(--glass-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+.worker-choice:hover {
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.worker-choice:has(input:checked) {
+  border-color: color-mix(in srgb, var(--teal) 45%, transparent);
+  background: color-mix(in srgb, var(--teal) 8%, transparent);
+}
+/* Stat panels: a sparkline under each figure, Grafana stat style. */
+.metric {
+  overflow: hidden;
+}
+.metric > :not(.sparkline) {
+  position: relative;
+  z-index: 1;
+}
+.sparkline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 46%;
+  color: var(--teal);
+  opacity: 0.85;
+  pointer-events: none;
+}
+.metric:not(.accent) .sparkline {
+  color: color-mix(in srgb, var(--teal) 55%, var(--log-info));
+}
+.sparkline-line {
+  stroke-width: 1.5px;
+}
+.sparkline path {
+  transition: d 600ms var(--ease-out);
+}
+.sparkline-area {
+  animation: fade-in 600ms ease backwards;
+}
+/* Validation plan: the editor keeps its own height instead of stretching to
+   the side column when results appear. */
+.editor-layout {
+  align-items: start;
+}
+:root {
+  --check-pass: #4fd8bd;
+  --check-warn: #f0bf6c;
+  --check-fail: #ff8f84;
+}
+[data-theme="light"] {
+  --check-pass: #0b7a66;
+  --check-warn: #8f5a0c;
+  --check-fail: #b3261e;
+}
+.pass {
+  --check: var(--check-pass);
+}
+.warn {
+  --check: var(--check-warn);
+}
+.fail {
+  --check: var(--check-fail);
+}
+.check-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font: 600 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--check);
+  background: color-mix(in srgb, var(--check) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--check) 40%, transparent);
+}
+.plan-result {
+  border-color: color-mix(in srgb, var(--check) 35%, var(--glass-border));
+  box-shadow:
+    var(--glass-edge),
+    var(--glass-shadow),
+    0 0 28px -14px var(--check);
+  animation: blur-fade 420ms var(--ease-out) backwards;
+}
+.plan-result h2 {
+  color: var(--text);
+}
+.plan-result h2 > svg {
+  color: var(--check);
+}
+.plan-result h2 .check-pill {
+  margin-left: auto;
+}
+.capacity-check {
+  position: relative;
+  margin-top: 10px;
+  padding: 10px 12px 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--check, var(--muted)) 25%, transparent);
+  border-left: 3px solid var(--check, var(--muted));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--check, var(--muted)) 7%, transparent);
+  animation: blur-fade 360ms var(--ease-out) backwards;
+}
+.capacity-check:nth-of-type(2) {
+  animation-delay: 60ms;
+}
+.capacity-check:nth-of-type(3) {
+  animation-delay: 120ms;
+}
+.capacity-check:nth-of-type(n + 4) {
+  animation-delay: 180ms;
+}
+.capacity-check strong,
+.capacity-check.warn strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+}
+.capacity-check p {
+  color: color-mix(in srgb, var(--check, var(--muted)) 30%, var(--text));
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+}
+.capacity-check small {
+  display: block;
+  color: var(--muted);
+}
+.actions button.validate-button {
+  color: var(--teal);
+  border-color: color-mix(in srgb, var(--teal) 45%, transparent);
+  background: color-mix(in srgb, var(--teal) 10%, transparent);
+}
+.actions button.validate-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--teal) 18%, transparent);
+  border-color: var(--teal);
+  box-shadow: 0 6px 20px -10px var(--teal);
+  transform: translateY(-1px);
+}
+.balance-tools {
+  display: flex;
+  gap: 8px;
+  padding: 0 23px 10px;
+}
+.balance-tools input,
+.balance-tools select {
+  margin: 0;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+.balance-tools input {
+  flex: 1;
+  min-width: 0;
+}
+.balance-tools select {
+  width: auto;
+}
+.balance-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 23px 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.balance-pager > span:first-child {
+  margin-right: auto;
+}
+.balance-pager button {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+/* Display time zone picker in the top bar. */
+.tz-picker {
+  position: relative;
+}
+.topbar .tz-trigger {
+  padding: 6px 10px;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tz-clock {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tz-name {
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 0.8px;
+  color: var(--teal);
+}
+.tz-menu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 300px;
+  padding: 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    var(--glass-edge),
+    0 24px 60px -20px #000a;
+  animation: menu-in 180ms var(--ease-out) backwards;
+  transform-origin: top right;
+}
+.tz-menu input {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.tz-menu ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.tz-menu .tz-group {
+  padding: 10px 8px 4px;
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tz-menu li button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+}
+.tz-menu li button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  border-color: transparent;
+}
+.tz-menu li button.selected {
+  color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+}
+.tz-menu li button small {
+  margin-left: auto;
+  font: 10px "IBM Plex Mono", monospace;
+  color: var(--muted);
+}
+@media (max-width: 700px) {
+  .tz-name,
+  .tz-trigger .lucide-chevron-down {
+    display: none;
+  }
+}
+/* Scenario import: button in the editor heading and a drop target. */
+.editor-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.editor-heading-actions > .mono {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.panel .import-button {
+  padding: 5px 10px;
+  font-size: 12px;
+}
+.panel.editor {
+  position: relative;
+}
+.drop-hint {
+  position: absolute;
+  inset: 64px 12px 12px;
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  border: 2px dashed color-mix(in srgb, var(--teal) 60%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+  color: var(--teal);
+  font-weight: 600;
+  pointer-events: none;
+  animation: fade-in 160ms ease backwards;
+}
+.panel.editor.dragging {
+  border-color: var(--teal);
+}
+.modal-backdrop.leaving {
+  animation: fade-out 180ms ease forwards;
+  pointer-events: none;
+}
+.modal-backdrop.leaving .modal {
+  animation: modal-out 180ms ease-in forwards;
+}
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+}
+/* Worker cards: platform tags, CPU model and headline resources. */
+.worker-card .worker-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.worker-card .worker-heading > svg {
+  color: var(--teal);
+}
+.worker-card .worker-heading h2 {
+  margin: 0 auto 0 0;
+  overflow-wrap: anywhere;
+}
+.worker-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.worker-tags span {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 0.6px;
+  color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal) 30%, transparent);
+}
+.worker-tags span:nth-child(2) {
+  color: var(--log-info);
+  background: color-mix(in srgb, var(--log-info) 12%, transparent);
+  border-color: color-mix(in srgb, var(--log-info) 30%, transparent);
+}
+.worker-tags span:nth-child(3) {
+  color: var(--log-action);
+  background: color-mix(in srgb, var(--log-action) 12%, transparent);
+  border-color: color-mix(in srgb, var(--log-action) 30%, transparent);
+}
+.worker-distro,
+.worker-cpu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.worker-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0 6px;
+}
+.worker-stats > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 6px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.worker-stats svg {
+  color: var(--teal);
+}
+.worker-stats span {
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.worker-stats strong {
+  grid-column: 1 / -1;
+  font: 500 14px "IBM Plex Mono", monospace;
+}
+.worker-card > small {
+  display: block;
+  margin-top: 10px;
+}
+/* The global input rule sets display:block, which would override [hidden]. */
+input[hidden] {
+  display: none;
+}
+/* The top bar is a backdrop root, so a nested blur would see nothing behind
+   the menu; give it an opaque surface instead. */
+.tz-menu {
+  background: color-mix(in srgb, var(--panel) 97%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.tz-menu li button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 14px;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+.tz-menu li button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tz-menu li button small {
+  margin-left: 0;
+}
+/* Keep sparklines below the figures and captions. */
+.metric:has(.sparkline) {
+  padding-bottom: 48px;
+}
+.sparkline {
+  height: 40px;
+}
+/* Test overview: four charts at a glance, thresholds as chips. */
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 23px;
+}
+@media (max-width: 1050px) {
+  .chart-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.threshold-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 23px;
+}
+.threshold-strip .threshold-chip {
+  gap: 10px;
+  padding: 7px 12px 7px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border-color: color-mix(in srgb, var(--check) 35%, transparent);
+  background: color-mix(in srgb, var(--check) 8%, transparent);
+}
+.threshold-chip .mono {
+  color: var(--check);
+}
+.run-console.tall .run-console-body {
+  max-height: min(70vh, 900px);
+}
+.run-console.tall .run-console-chevron {
+  display: none;
+}
+/* Dialog motion, tuned to be noticeable: rise and unblur in, sink out. */
+.modal-backdrop {
+  animation: backdrop-in 280ms ease backwards;
+}
+.modal {
+  animation: modal-in 420ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.modal-backdrop.leaving {
+  animation: backdrop-out 240ms ease forwards;
+}
+.modal-backdrop.leaving .modal {
+  animation: modal-out 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
+}
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+    -webkit-backdrop-filter: blur(0);
+    backdrop-filter: blur(0);
+  }
+}
+@keyframes backdrop-out {
+  to {
+    opacity: 0;
+    -webkit-backdrop-filter: blur(0);
+    backdrop-filter: blur(0);
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(28px) scale(0.94);
+    filter: blur(6px);
+  }
+}
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+    filter: blur(4px);
+  }
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+/* Fleet summary, search and paging for many workers. */
+.worker-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.worker-summary > div {
+  display: grid;
+  gap: 2px;
+  padding: 10px 16px;
+  min-width: 110px;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: var(--glass);
+  box-shadow: var(--glass-edge);
+}
+.worker-summary span {
+  font: 500 10px "IBM Plex Mono", monospace;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.worker-summary strong {
+  font: 500 20px "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+.worker-state.ready strong,
+.worker-state.running strong {
+  color: var(--check-pass);
+}
+.worker-state.lost strong {
+  color: var(--check-fail);
+}
+.worker-tools,
+.worker-picker-tools {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.worker-tools input,
+.worker-picker-tools input {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.worker-tools select {
+  width: auto;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.worker-picker-tools {
+  flex-wrap: wrap;
+  margin: 12px 0 0;
+}
+.worker-picker-tools button {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+.worker-picker-list {
+  max-height: 300px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.worker-none {
+  padding: 18px 0;
+  text-align: center;
+}
+.balance-pager {
+  margin-top: 6px;
+}
+/* Theme the scrollbars; the native square bar cut the modal's rounded corners. */
+:root {
+  scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+}
+.modal {
+  scrollbar-width: thin;
+}
+/* Reduced motion drops the rise, scale and blur but keeps a short fade, so
+   opening and closing a dialog still reads as a change of state. */
+@media (prefers-reduced-motion: reduce) {
+  .modal-backdrop,
+  .modal {
+    animation: fade-in 160ms ease backwards !important;
+  }
+  .modal-backdrop.leaving,
+  .modal-backdrop.leaving .modal {
+    animation: fade-out 160ms ease forwards !important;
+  }
+}

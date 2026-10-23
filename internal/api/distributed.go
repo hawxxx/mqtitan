@@ -141,7 +141,7 @@ func (m *Manager) runDistributed(ctx context.Context, r *execution) error {
 		case <-tick.C:
 			all := true
 			var failure error
-			var lost []string
+			var lost, failed []string
 			m.workers.mu.Lock()
 			for _, id := range r.workerIDs {
 				w := m.workers.workers[id]
@@ -155,6 +155,7 @@ func (m *Manager) runDistributed(ctx context.Context, r *execution) error {
 				}
 				if w.report.Error != "" {
 					failure = errors.New("worker execution failed")
+					failed = append(failed, id)
 				}
 			}
 			if len(lost) > 0 {
@@ -163,6 +164,14 @@ func (m *Manager) runDistributed(ctx context.Context, r *execution) error {
 			}
 			m.workers.mu.Unlock()
 			if failure != nil {
+				m.mu.Lock()
+				if len(failed) > 0 {
+					m.logEvent(r, "error", "Worker execution failed on %s; stopping the other workers", strings.Join(failed, ", "))
+				}
+				if len(lost) > 0 {
+					m.logEvent(r, "error", "Worker lease expired on %s; its assigned load is lost", strings.Join(lost, ", "))
+				}
+				m.mu.Unlock()
 				// Automatic replacement is not implemented: stop the survivors
 				// and collect their final counters before failing the run.
 				m.drain(r)

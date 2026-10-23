@@ -1,18 +1,78 @@
+import { useState } from "react";
 import type { Balance, BalanceGroup, FleetSample } from "./model";
 import { number } from "./model";
+import { Pager } from "./Pager";
+
+const PAGE_SIZE = 20;
+type Order = "most" | "least" | "name";
 
 function Bars({ title, groups }: { title: string; groups: BalanceGroup[] }) {
+  const [query, setQuery] = useState("");
+  const [order, setOrder] = useState<Order>("most");
+  const [page, setPage] = useState(0);
   const max = Math.max(1, ...groups.map((g) => g.connections));
+  const many = groups.length > PAGE_SIZE;
+  const filtered = groups
+    .filter((g) => g.key.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a, b) =>
+      order === "name"
+        ? a.key.localeCompare(b.key, undefined, { numeric: true })
+        : order === "most"
+          ? b.connections - a.connections
+          : a.connections - b.connections,
+    );
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const current = Math.min(page, pages - 1);
+  const shown = many
+    ? filtered.slice(current * PAGE_SIZE, (current + 1) * PAGE_SIZE)
+    : filtered;
   return (
     <div className="address-table">
       <h3>{title}</h3>
-      {groups.map((g) => (
+      {many && (
+        <div className="balance-tools">
+          <input
+            type="search"
+            aria-label={`Filter ${title.toLowerCase()}`}
+            placeholder="Filter by name"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(0);
+            }}
+          />
+          <select
+            aria-label={`Sort ${title.toLowerCase()}`}
+            value={order}
+            onChange={(e) => {
+              setOrder(e.target.value as Order);
+              setPage(0);
+            }}
+          >
+            <option value="most">Most connections</option>
+            <option value="least">Fewest connections</option>
+            <option value="name">Name</option>
+          </select>
+        </div>
+      )}
+      {shown.map((g) => (
         <div className="balance-row" key={g.key}>
-          <span className="mono">{g.key}</span>
+          <span className="mono" title={g.key}>
+            {g.key}
+          </span>
           <progress max={max} value={g.connections} aria-label={g.key} />
           <span>{number(g.connections)}</span>
         </div>
       ))}
+      {many && (
+        <Pager
+          label={title}
+          total={filtered.length}
+          page={current}
+          pageSize={PAGE_SIZE}
+          onPage={setPage}
+        />
+      )}
     </div>
   );
 }
@@ -23,10 +83,13 @@ const ratio = (v: number | null) => (v == null ? "∞" : v.toFixed(2));
 
 // liveBalance derives a balance from the newest non-baseline sample while a
 // test runs; finished tests carry the server-computed peak in Test.balance.
-export function liveBalance(samples: FleetSample[] | undefined): Balance | undefined {
+export function liveBalance(
+  samples: FleetSample[] | undefined,
+): Balance | undefined {
   const s = [...(samples || [])].reverse().find((x) => !x.baseline);
   if (!s) return undefined;
-  const sum = (m: Map<string, number>) => [...m].map(([key, connections]) => ({ key, connections }));
+  const sum = (m: Map<string, number>) =>
+    [...m].map(([key, connections]) => ({ key, connections }));
   const targets = new Map<string, number>();
   const zones = new Map<string, number>();
   let allZones = true;
@@ -41,8 +104,16 @@ export function liveBalance(samples: FleetSample[] | undefined): Balance | undef
     const mean = v.reduce((a, b) => a + b, 0) / (v.length || 1);
     const lo = Math.min(...v);
     const hi = Math.max(...v);
-    const sd = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / (v.length || 1));
-    return { mean, sd, lo, hi, ratio: hi === 0 ? 1 : lo === 0 ? null : hi / lo };
+    const sd = Math.sqrt(
+      v.reduce((a, b) => a + (b - mean) ** 2, 0) / (v.length || 1),
+    );
+    return {
+      mean,
+      sd,
+      lo,
+      hi,
+      ratio: hi === 0 ? 1 : lo === 0 ? null : hi / lo,
+    };
   };
   const t = sum(targets);
   const z = allZones ? sum(zones) : [];
@@ -60,36 +131,68 @@ export function liveBalance(samples: FleetSample[] | undefined): Balance | undef
   };
 }
 
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="balance-stat">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 export function BalancePanel({ balance }: { balance?: Balance }) {
   if (!balance) return null;
   const hasZones = balance.zones.length > 0;
-  const cvSeen = balance.targets.length >= 2 && sumOf(balance.targets) > 0;
+  const observed = sumOf(balance.targets) > 0;
+  const cvSeen = balance.targets.length >= 2 && observed;
   return (
     <section className="panel balance-panel">
-      <h2>Broker balance</h2>
+      <div className="panel-heading">
+        <div>
+          <h2>Broker balance</h2>
+          <p>Connections per broker target and zone, from broker telemetry</p>
+        </div>
+      </div>
       {!balance.complete && (
         <div className="notice warning" role="status">
-          <p>Incomplete telemetry: some broker targets did not report, so balance figures may be off.</p>
+          <p>
+            Incomplete telemetry: some broker targets did not report, so balance
+            figures may be off.
+          </p>
         </div>
       )}
-      <div className="balance-tiles">
-        {cvSeen ? (
-          <>
-            <strong>CV {pct(balance.targetCV)}</strong>
-            <strong>Max/min {ratio(balance.targetRatio)}</strong>
-          </>
-        ) : (
-          <strong>No observations</strong>
-        )}
+      <div className="balance-stats">
+        <Stat label="Targets" value={number(balance.targets.length)} />
+        {cvSeen && <Stat label="CV" value={pct(balance.targetCV)} />}
+        {cvSeen && <Stat label="Max/min" value={ratio(balance.targetRatio)} />}
         {hasZones && (
-          <strong>Zone skew {sumOf(balance.zones) > 0 && balance.zones.length >= 2 ? pct(balance.zoneSkew) : "—"}</strong>
+          <Stat
+            label="Zone skew"
+            value={
+              sumOf(balance.zones) > 0 && balance.zones.length >= 2
+                ? pct(balance.zoneSkew)
+                : "—"
+            }
+          />
+        )}
+        {!observed ? (
+          <p className="balance-note">No observations</p>
+        ) : (
+          !cvSeen && (
+            <p className="balance-note">
+              Spread statistics need at least two targets.
+            </p>
+          )
         )}
       </div>
       <Bars title="Connections per target" groups={balance.targets} />
       {hasZones ? (
         <Bars title="Connections per zone" groups={balance.zones} />
       ) : (
-        <p className="muted">Zone labels missing on one or more targets; zone statistics are unavailable.</p>
+        <p className="balance-note balance-zones-missing">
+          Zone labels missing on one or more targets; zone statistics are
+          unavailable.
+        </p>
       )}
     </section>
   );

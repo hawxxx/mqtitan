@@ -10,6 +10,7 @@ import (
 	"github.com/mqtitan/mqtitan/internal/api"
 	"github.com/mqtitan/mqtitan/internal/engine"
 	"github.com/mqtitan/mqtitan/internal/metrics"
+	"github.com/mqtitan/mqtitan/internal/platform"
 	"github.com/mqtitan/mqtitan/internal/scenario"
 	"io"
 	"log/slog"
@@ -21,8 +22,8 @@ import (
 )
 
 type Options struct {
-	Controller, ID, Token string
-	OnReady               func(bool)
+	Controller, ID, Token, Version string
+	OnReady                        func(bool)
 }
 type httpStatusError struct{ status int }
 
@@ -95,6 +96,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	registered := false
 	session := ""
+	host := platform.HostInfo(opts.Version)
 	var sequence uint64
 	lastContact := time.Now()
 	var current *running
@@ -117,7 +119,7 @@ func Run(ctx context.Context, opts Options) error {
 			var reg struct {
 				Session string `json:"session"`
 			}
-			err = post("/api/v1/workers/register", api.Worker{ID: opts.ID, CPUCount: runtime.NumCPU(), SupportsLiveControl: true, Session: session}, &reg)
+			err = post("/api/v1/workers/register", api.Worker{ID: opts.ID, CPUCount: runtime.NumCPU(), SupportsLiveControl: true, Session: session, Host: &host}, &reg)
 			if err == nil {
 				registered = true
 				session = reg.Session

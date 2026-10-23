@@ -169,6 +169,9 @@ func parseScenarioArgs(name string, args []string, f *flag.FlagSet) (scenario.Sc
 	if err != nil {
 		return s, err
 	}
+	if err = s.ResolveRun(); err != nil {
+		return s, err
+	}
 	return s, thresholds.Validate(s.Thresholds)
 }
 

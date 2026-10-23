@@ -199,3 +199,20 @@ func TestPlanChurnConnectsPerSecond(t *testing.T) {
 		t.Fatalf("churn rate %v without lifetime", got)
 	}
 }
+
+func TestResolveRunIsUniquePerCall(t *testing.T) {
+	a := Scenario{Clients: Clients{IDTemplate: "lt-${run}-${sequence}"}}
+	b := a
+	if err := a.ResolveRun(); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.ResolveRun(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(a.Clients.IDTemplate, "${run}") || a.Clients.IDTemplate == b.Clients.IDTemplate {
+		t.Fatalf("run token not resolved uniquely: %q %q", a.Clients.IDTemplate, b.Clients.IDTemplate)
+	}
+	if !strings.Contains(a.Clients.IDTemplate, "${sequence}") {
+		t.Fatal("sequence placeholder lost")
+	}
+}

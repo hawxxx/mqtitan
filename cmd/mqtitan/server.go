@@ -274,7 +274,7 @@ func workerCommand(args []string) error {
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(listener) }()
 	defer srv.Close()
-	err = worker.Run(ctx, worker.Options{Controller: *controller, ID: *id, Token: workerToken(), OnReady: ready.Store})
+	err = worker.Run(ctx, worker.Options{Controller: *controller, ID: *id, Token: workerToken(), Version: version, OnReady: ready.Store})
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}

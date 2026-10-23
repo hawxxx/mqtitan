@@ -1,8 +1,11 @@
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent } from "@testing-library/react";
 import { describe, it, expect, afterEach } from "vitest";
 import { BalancePanel } from "./BalancePanel";
 import type { Balance } from "./model";
 afterEach(cleanup);
+
+const stat = (label: string) =>
+  screen.getByText(label).nextElementSibling?.textContent;
 
 const balance = (over: Partial<Balance> = {}): Balance => ({
   timestamp: "2026-01-01T00:00:00Z",
@@ -25,9 +28,10 @@ const balance = (over: Partial<Balance> = {}): Balance => ({
 describe("BalancePanel", () => {
   it("shows the coefficient of variation, ratio and skew", () => {
     render(<BalancePanel balance={balance()} />);
-    expect(screen.getByText("CV 5.0%")).toBeTruthy();
-    expect(screen.getByText("Max/min 1.11")).toBeTruthy();
-    expect(screen.getByText("Zone skew 10.0%")).toBeTruthy();
+    expect(stat("Targets")).toBe("2");
+    expect(stat("CV")).toBe("5.0%");
+    expect(stat("Max/min")).toBe("1.11");
+    expect(stat("Zone skew")).toBe("10.0%");
     expect(screen.getByText("emqx-0")).toBeTruthy();
     expect(screen.getByText("zone-b")).toBeTruthy();
     expect(screen.queryByText(/incomplete telemetry/i)).toBeNull();
@@ -37,19 +41,66 @@ describe("BalancePanel", () => {
     expect(screen.getByText(/incomplete telemetry/i)).toBeTruthy();
   });
   it("notes missing zone labels and an infinite ratio", () => {
-    render(<BalancePanel balance={balance({ zones: [], targetRatio: null })} />);
+    render(
+      <BalancePanel balance={balance({ zones: [], targetRatio: null })} />,
+    );
     expect(screen.getByText(/zone labels missing/i)).toBeTruthy();
-    expect(screen.getByText("Max/min ∞")).toBeTruthy();
+    expect(stat("Max/min")).toBe("∞");
   });
   it("shows no observations for an all-zero fleet", () => {
     render(
       <BalancePanel
-        balance={balance({ targets: [{ key: "a", connections: 0 }, { key: "b", connections: 0 }], zones: [{ key: "z", connections: 0 }] })}
+        balance={balance({
+          targets: [
+            { key: "a", connections: 0 },
+            { key: "b", connections: 0 },
+          ],
+          zones: [{ key: "z", connections: 0 }],
+        })}
       />,
     );
     expect(screen.getByText("No observations")).toBeTruthy();
-    expect(screen.queryByText(/CV 0/)).toBeNull();
-    expect(screen.getByText("Zone skew —")).toBeTruthy();
+    expect(screen.queryByText("CV")).toBeNull();
+    expect(stat("Zone skew")).toBe("—");
+  });
+  it("explains why a single target has no spread statistics", () => {
+    render(
+      <BalancePanel
+        balance={balance({
+          targets: [{ key: "emqx-0", connections: 50000 }],
+          zones: [{ key: "local", connections: 50000 }],
+        })}
+      />,
+    );
+    expect(stat("Targets")).toBe("1");
+    expect(screen.queryByText("No observations")).toBeNull();
+    expect(screen.getByText(/need at least two targets/)).toBeTruthy();
+  });
+  it("pages, sorts and filters large fleets", () => {
+    const targets = Array.from({ length: 45 }, (_, i) => ({
+      key: `emqx-${i}`,
+      connections: i * 10,
+    }));
+    render(<BalancePanel balance={balance({ targets, zones: [] })} />);
+    const rows = () =>
+      [...document.querySelectorAll(".address-table")][0].querySelectorAll(
+        ".balance-row .mono",
+      );
+    expect(rows()).toHaveLength(20);
+    expect(rows()[0].textContent).toBe("emqx-44");
+    expect(screen.getByText("1–20 of 45")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(rows()).toHaveLength(5);
+    expect(screen.getByText("41–45 of 45")).toBeTruthy();
+    fireEvent.change(screen.getByRole("combobox", { name: /sort/i }), {
+      target: { value: "name" },
+    });
+    expect(rows()[1].textContent).toBe("emqx-1");
+    fireEvent.change(screen.getByRole("searchbox", { name: /filter/i }), {
+      target: { value: "emqx-4" },
+    });
+    expect(screen.getByText("1–6 of 6")).toBeTruthy();
   });
   it("renders nothing without balance data", () => {
     const { container } = render(<BalancePanel balance={undefined} />);

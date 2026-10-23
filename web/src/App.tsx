@@ -6,8 +6,18 @@ import { BalancePanel, liveBalance } from "./BalancePanel";
 import { LatencyPanel } from "./LatencyPanel";
 import { CertificateSettings } from "./CertificateSettings";
 import { LiveLoadControls } from "./LiveLoadControls";
+import { BorderBeam } from "./components/magicui/BorderBeam";
 import { GridPattern } from "./components/magicui/GridPattern";
+import { NumberTicker } from "./components/magicui/NumberTicker";
 import { RunAgainButton } from "./RunAgainButton";
+import { RunConsole } from "./RunConsole";
+import { readScenarioFiles } from "./scenarioImport";
+import { Pager } from "./Pager";
+import { Sparkline } from "./Sparkline";
+import { TimeZonePicker } from "./TimeZonePicker";
+import { WorkerCard } from "./WorkerCard";
+import { clock, dateTime, day, useTimeZone } from "./timezone";
+import { YamlEditor, YamlView } from "./YamlCode";
 import {
   createRootRoute,
   createRoute,
@@ -54,6 +64,7 @@ import {
   TriangleAlert,
   X,
   Zap,
+  Upload,
 } from "lucide-react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
@@ -69,6 +80,7 @@ import {
   request,
   type Check,
   type FleetSample,
+  type LogEvent,
   type Sample,
   type SavedScenario,
   type Test,
@@ -97,15 +109,17 @@ function Empty({
   title,
   detail,
   action,
+  icon: Icon = Activity,
 }: {
   title: string;
   detail: string;
   action?: ReactNode;
+  icon?: typeof Activity;
 }) {
   return (
     <div className="empty">
       <div className="empty-mark">
-        <Activity size={30} />
+        <Icon size={30} />
       </div>
       <h3>{title}</h3>
       <p>{detail}</p>
@@ -193,17 +207,22 @@ function Metric({
   value,
   sub,
   accent = false,
+  spark,
+  sparkZero,
 }: {
   label: string;
   value: ReactNode;
   sub?: string;
   accent?: boolean;
+  spark?: number[];
+  sparkZero?: boolean;
 }) {
   return (
     <div className={`metric ${accent ? "accent" : ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
       <small>{sub}</small>
+      {spark && <Sparkline values={spark} zero={sparkZero} />}
     </div>
   );
 }
@@ -290,7 +309,12 @@ function Chart({
             stroke: "#7f949c",
             grid: { stroke: "rgba(127,148,156,.1)" },
             font: "11px monospace",
-            size: 72,
+            // Fit the widest tick label so "78.1 KB/s" is not clipped.
+            size: (_u, values) =>
+              Math.max(
+                56,
+                Math.max(0, ...(values || []).map((v) => v.length)) * 7 + 22,
+              ),
             // Axis ticks are round numbers; drop the ".00" the readout keeps.
             values: (_u, ticks) =>
               ticks.map((v) => format(v).replace(/\.0+(?= )/, "")),
@@ -384,7 +408,7 @@ function RunTable({
         header: "Started",
         cell: (c) => (
           <span className="mono subdued">
-            {new Date(c.getValue<string>()).toLocaleString()}
+            <Stamp at={c.getValue<string>()} />
           </span>
         ),
       },
@@ -543,9 +567,12 @@ export function Dashboard({
     enabled: !!latest,
     refetchInterval: latest?.status === "running" ? 3000 : false,
   });
+  // Sparklines show the latest run's last five minutes.
+  const series = (samples.data || []).slice(-300);
   return (
     <>
       <div className="dashboard-intro">
+        <BorderBeam />
         <GridPattern
           squares={[
             [12, 1],
@@ -556,8 +583,8 @@ export function Dashboard({
         />
         <Title
           eyebrow="OPERATIONS / OVERVIEW"
-          title="Performance at a glance"
-          detail="Your MQTT infrastructure. Measured, not guessed."
+          title="Overview"
+          detail="Active tests and recent results in this workspace."
         >
           <button className="primary" onClick={create}>
             <Plus size={16} /> New test
@@ -567,32 +594,57 @@ export function Dashboard({
       <div className="metrics">
         <Metric
           label="ACTIVE TESTS"
-          value={running.length}
-          sub={`${tests.length} total recorded runs`}
+          value={<NumberTicker value={running.length} format={number} />}
+          sub={`${number(tests.length)} recorded ${tests.length === 1 ? "run" : "runs"}`}
           accent
         />
         <Metric
           label="CONNECTED CLIENTS"
-          value={number(running.reduce((n, t) => n + t.snapshot.connected, 0))}
+          value={
+            <NumberTicker
+              value={running.reduce((n, t) => n + t.snapshot.connected, 0)}
+              format={number}
+            />
+          }
           sub="Across active tests"
+          spark={series.map((x) => x.snapshot.connected)}
+          sparkZero
         />
         <Metric
           label="MESSAGES PUBLISHED"
-          value={number(tests.reduce((n, t) => n + t.snapshot.published, 0))}
-          sub="All recorded runs"
+          value={
+            <NumberTicker
+              value={tests.reduce((n, t) => n + t.snapshot.published, 0)}
+              format={number}
+            />
+          }
+          sub={
+            latest?.status === "running" && series.length
+              ? `${number(Math.round(series[series.length - 1].messageRate))} msg/s now`
+              : "All recorded runs"
+          }
+          spark={series.map((x) => x.messageRate)}
+          sparkZero
         />
         <Metric
           label="LATEST P95 LATENCY"
-          value={latest ? latency(latest.snapshot.p95) : "—"}
+          value={
+            latest ? (
+              <NumberTicker value={latest.snapshot.p95} format={latency} />
+            ) : (
+              "—"
+            )
+          }
           sub={latest ? latest.name : "Waiting for first result"}
+          spark={series.map((x) => x.snapshot.p95)}
         />
       </div>
       {!tests.length ? (
         <section className="panel welcome">
           <GridPattern className="welcome-grid" />
           <Empty
-            title="Your performance baseline starts here"
-            detail="Connect a broker, define your workload, and see how your MQTT infrastructure behaves under pressure."
+            title="No tests yet"
+            detail="Create a test to connect to a broker and publish load. Results appear here."
             action={
               <button className="primary" onClick={create}>
                 <Play size={15} /> Create your first test
@@ -651,12 +703,27 @@ export function Dashboard({
   );
 }
 export function Wizard({
-  done,
-  close,
+  done: finish,
+  close: dismiss,
 }: {
   done: (yaml: string) => void;
   close: () => void;
 }) {
+  // Play the exit animation before unmounting; reduced motion keeps a shorter
+  // opacity-only fade (see styles.css).
+  const [leaving, setLeaving] = useState(false);
+  const leave = (after: () => void) => {
+    if (leaving) return;
+    setLeaving(true);
+    setTimeout(
+      after,
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+        ? 160
+        : 240,
+    );
+  };
+  const close = () => leave(dismiss);
+  const done = (yaml: string) => leave(() => finish(yaml));
   const [v, setV] = useState<WizardValues>({
     name: "MQTT baseline",
     broker: "mqtt://localhost:1883",
@@ -671,15 +738,18 @@ export function Wizard({
   const dialog = useRef<HTMLElement>(null);
   const closeRef = useRef(close);
   closeRef.current = close;
-  // Modal focus: move focus in, keep Tab inside, make the page behind inert,
-  // and return focus to whatever opened the wizard.
+  // Modal focus: move focus to the first field, keep Tab inside, make the
+  // page behind inert and still, and return focus to whatever opened it.
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     const shell = document.querySelector<HTMLElement>(".app-shell");
     shell?.setAttribute("inert", "");
-    dialog.current
-      ?.querySelector<HTMLElement>("input, select, button")
-      ?.focus();
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    (
+      dialog.current?.querySelector<HTMLElement>("input, select, textarea") ??
+      dialog.current?.querySelector<HTMLElement>("button")
+    )?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeRef.current();
       if (e.key !== "Tab" || !dialog.current) return;
@@ -702,6 +772,7 @@ export function Wizard({
     return () => {
       window.removeEventListener("keydown", onKey);
       shell?.removeAttribute("inert");
+      document.body.style.overflow = overflow;
       opener?.focus?.();
     };
   }, []);
@@ -728,7 +799,7 @@ export function Wizard({
   }
   return createPortal(
     <div
-      className="modal-backdrop"
+      className={`modal-backdrop${leaving ? " leaving" : ""}`}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) close();
       }}
@@ -955,6 +1026,7 @@ export function ScenarioEditor({
   const [name, setName] = useState("MQTT baseline");
   const [message, setMessage] = useState("");
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
+  const [workerQuery, setWorkerQuery] = useState("");
   const qc = useQueryClient();
   const workers = useQuery({
     queryKey: ["workers"],
@@ -989,6 +1061,40 @@ export function ScenarioEditor({
       setMessage("Scenario saved.");
     },
   });
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const importFiles = useMutation({
+    mutationFn: async (files: File[]) => {
+      const { scenarios, errors } = await readScenarioFiles(files);
+      if (scenarios.length === 1 && !errors.length) {
+        setYaml(scenarios[0].yaml);
+        setName(scenarios[0].name);
+        return `Loaded ${scenarios[0].file} into the editor.`;
+      }
+      let saved = 0;
+      for (const sc of scenarios) {
+        try {
+          await request<SavedScenario>("/scenarios", {
+            method: "POST",
+            body: JSON.stringify({ name: sc.name, yaml: sc.yaml }),
+          });
+          saved++;
+        } catch (e) {
+          errors.push(`${sc.file}: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+      qc.invalidateQueries({ queryKey: ["scenarios"] });
+      if (errors.length)
+        throw new Error(
+          `Imported ${saved} of ${files.length}. ${errors.join("; ")}`,
+        );
+      return `Imported ${saved} scenarios into your library.`;
+    },
+    onSuccess: setMessage,
+  });
+  const onFiles = (list: FileList | null) => {
+    if (list?.length) importFiles.mutate([...list]);
+  };
   const plan = useMutation({
     mutationFn: () =>
       request<Record<string, unknown>>("/plan", {
@@ -1004,10 +1110,19 @@ export function ScenarioEditor({
       <Title
         eyebrow="WORKLOADS / SCENARIOS"
         title="Scenario lab"
-        detail="Versionable workloads. Explicit stages. Repeatable results."
+        detail="YAML workload definitions with explicit stages."
       >
-        <button disabled={plan.isPending} onClick={() => plan.mutate()}>
-          <Gauge size={16} /> Validate & plan
+        <button
+          className="validate-button"
+          disabled={plan.isPending}
+          onClick={() => plan.mutate()}
+        >
+          {plan.isPending ? (
+            <RefreshCw size={16} className="spin" />
+          ) : (
+            <Gauge size={16} />
+          )}
+          {plan.isPending ? "Validating…" : "Validate & plan"}
         </button>
         <button
           className="primary"
@@ -1018,29 +1133,72 @@ export function ScenarioEditor({
           {start.isPending ? "Starting…" : "Start test"}
         </button>
       </Title>
-      {(start.error || save.error || plan.error) && (
-        <ErrorNotice error={start.error || save.error || plan.error} />
+      {(start.error || save.error || plan.error || importFiles.error) && (
+        <ErrorNotice
+          error={start.error || save.error || plan.error || importFiles.error}
+        />
       )}
       <div className="editor-layout">
-        <section className="panel editor">
+        <section
+          className={`panel editor${dragging ? " dragging" : ""}`}
+          onDragOver={(e) => {
+            if (!e.dataTransfer.types.includes("Files")) return;
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node))
+              setDragging(false);
+          }}
+          onDrop={(e) => {
+            if (!e.dataTransfer.files.length) return;
+            e.preventDefault();
+            setDragging(false);
+            onFiles(e.dataTransfer.files);
+          }}
+        >
           <div className="panel-heading">
             <h2>
               <FileCode2 size={17} /> scenario.yaml
             </h2>
-            <span className="subdued mono">YAML / v1alpha1</span>
+            <div className="editor-heading-actions">
+              <span className="subdued mono">YAML / v1alpha1</span>
+              <button
+                className="import-button"
+                disabled={importFiles.isPending}
+                onClick={() => fileInput.current?.click()}
+                title="Load one file into the editor, or save several to your library"
+              >
+                <Upload size={14} /> Import
+              </button>
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".yaml,.yml,application/yaml,text/yaml"
+                multiple
+                hidden
+                aria-label="Import scenario files"
+                onChange={(e) => {
+                  onFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </div>
           </div>
-          <textarea
-            aria-label="Scenario YAML"
-            spellCheck={false}
-            value={yaml}
-            onChange={(e) => setYaml(e.target.value)}
-          />
+          {dragging && (
+            <div className="drop-hint" aria-hidden="true">
+              <Upload size={22} />
+              Drop YAML files to import
+            </div>
+          )}
+          <YamlEditor label="Scenario YAML" value={yaml} onChange={setYaml} />
           <div className="panel-footer">
             <span>Broker credentials in YAML are sent to the server.</span>
             <span className="mono">{yaml.split("\n").length} lines</span>
           </div>
         </section>
         <aside>
+          {plan.data && <PlanResult key={plan.submittedAt} plan={plan.data} />}
           <section className="panel side-panel">
             <h2>
               <Server size={17} /> Execution workers
@@ -1052,35 +1210,13 @@ export function ScenarioEditor({
             {workers.error ? (
               <ErrorNotice error={workers.error} />
             ) : (
-              workers.data
-                ?.filter((w) => w.id !== "local")
-                .map((w) => (
-                  <label className="worker-choice" key={w.id}>
-                    <input
-                      type="checkbox"
-                      aria-label={w.id}
-                      checked={selectedWorkers.includes(w.id)}
-                      disabled={
-                        !["ready", "online", "idle", "active"].includes(
-                          w.status,
-                        )
-                      }
-                      onChange={(e) =>
-                        setSelectedWorkers((old) =>
-                          e.target.checked
-                            ? [...old, w.id]
-                            : old.filter((x) => x !== w.id),
-                        )
-                      }
-                    />
-                    <span>
-                      {w.id}
-                      <small>
-                        {w.status} · {w.cpuCount} cores
-                      </small>
-                    </span>
-                  </label>
-                ))
+              <WorkerPicker
+                workers={(workers.data || []).filter((w) => w.id !== "local")}
+                selected={selectedWorkers}
+                onChange={setSelectedWorkers}
+                query={workerQuery}
+                onQuery={setWorkerQuery}
+              />
             )}
             <small className="subdued">
               {selectedWorkers.length
@@ -1127,7 +1263,9 @@ export function ScenarioEditor({
                   <FileCode2 size={17} />
                   <span>
                     {s.name}
-                    <small>{new Date(s.createdAt).toLocaleDateString()}</small>
+                    <small>
+                      <Stamp at={s.createdAt} format={day} />
+                    </small>
                   </span>
                   <ChevronRight size={14} />
                 </button>
@@ -1136,44 +1274,65 @@ export function ScenarioEditor({
               <p>No saved scenarios yet.</p>
             )}
           </section>
-          {plan.data && (
-            <section className="panel side-panel">
-              <h2>
-                <CheckCircle2 size={17} /> Validated execution plan
-              </h2>
-              {Object.entries(plan.data)
-                .filter(([k]) => k !== "checks" && k !== "Warnings")
-                .map(([k, v]) => (
-                  <div className="plan-row" key={k}>
-                    <span>{planLabel(k)}</span>
-                    <strong className="mono">{planValue(k, v)}</strong>
-                  </div>
-                ))}
-              {Array.isArray(plan.data.Warnings) &&
-                plan.data.Warnings.map((w: string) => (
-                  <div className="capacity-check warn" key={w}>
-                    <strong>WARN · workload</strong>
-                    <p>{w}</p>
-                  </div>
-                ))}
-              {Array.isArray(plan.data.checks) &&
-                plan.data.checks.map((c: Check) => (
-                  <div
-                    className={`capacity-check ${c.Status.toLowerCase()}`}
-                    key={c.Name}
-                  >
-                    <strong>
-                      {c.Status} · {c.Name}
-                    </strong>
-                    <p>{c.Value}</p>
-                    {c.Recommendation && <small>{c.Recommendation}</small>}
-                  </div>
-                ))}
-            </section>
-          )}
         </aside>
       </div>
     </>
+  );
+}
+function PlanResult({ plan }: { plan: Record<string, unknown> }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, []);
+  const checks = Array.isArray(plan.checks) ? (plan.checks as Check[]) : [];
+  const warnings = Array.isArray(plan.Warnings)
+    ? (plan.Warnings as string[])
+    : [];
+  const statuses = checks.map((c) => c.Status.toLowerCase());
+  const overall = statuses.includes("fail")
+    ? "fail"
+    : statuses.includes("warn") || warnings.length
+      ? "warn"
+      : "pass";
+  const Icon = overall === "pass" ? CheckCircle2 : TriangleAlert;
+  return (
+    <section ref={ref} className={`panel side-panel plan-result ${overall}`}>
+      <h2>
+        <Icon size={17} /> Validated execution plan
+        <span className={`check-pill ${overall}`}>{overall}</span>
+      </h2>
+      {Object.entries(plan)
+        .filter(([k]) => k !== "checks" && k !== "Warnings")
+        .map(([k, v]) => (
+          <div className="plan-row" key={k}>
+            <span>{planLabel(k)}</span>
+            <strong className="mono">{planValue(k, v)}</strong>
+          </div>
+        ))}
+      {warnings.map((w) => (
+        <div className="capacity-check warn" key={w}>
+          <strong>
+            <span className="check-pill warn">warn</span> Workload
+          </strong>
+          <p>{w}</p>
+        </div>
+      ))}
+      {checks.map((c) => (
+        <div
+          className={`capacity-check ${c.Status.toLowerCase()}`}
+          key={c.Name}
+        >
+          <strong>
+            <span className={`check-pill ${c.Status.toLowerCase()}`}>
+              {c.Status.toLowerCase()}
+            </span>{" "}
+            {c.Name}
+          </strong>
+          <p>{c.Value}</p>
+          {c.Recommendation && <small>{c.Recommendation}</small>}
+        </div>
+      ))}
+    </section>
   );
 }
 // The plan endpoint returns Go field names and raw units (nanoseconds, bytes).
@@ -1247,8 +1406,14 @@ function useStream(id: string, running: boolean) {
                 qc.setQueryData<FleetSample[]>(["brokers", id], (old) =>
                   [...(old || []), v].slice(-2880),
                 );
+              if (event === "log")
+                qc.setQueryData<LogEvent[]>(["events", id], (old) =>
+                  old?.some((e) => e.seq === v.seq) ? old : [...(old || []), v],
+                );
               if (event === "status") {
                 qc.setQueryData(["test", id], v);
+                if (v.status !== "running")
+                  qc.invalidateQueries({ queryKey: ["events", id] });
                 qc.invalidateQueries({ queryKey: ["tests"] });
               }
             } catch {
@@ -1294,6 +1459,12 @@ function TestDetail({ id }: { id: string }) {
     queryFn: () => request<FleetSample[]>(`/tests/${id}/brokers`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
+  const events = useQuery({
+    queryKey: ["events", id],
+    queryFn: () => request<LogEvent[]>(`/tests/${id}/events`),
+    refetchInterval: t?.status === "running" ? 10000 : false,
+  });
+  const zone = useTimeZone();
   const [tab, setTab] = useState("Overview");
   const [exportError, setExportError] = useState<unknown>();
   const qc = useQueryClient();
@@ -1313,12 +1484,13 @@ function TestDetail({ id }: { id: string }) {
       </div>
     );
   const s = t.snapshot;
+  const series = (metrics.data || []).slice(-300);
   return (
     <>
       <Title
         eyebrow={`TESTS / ${id.slice(0, 12)}`}
         title={t.name}
-        detail={`Started ${new Date(t.startedAt).toLocaleString()}${t.endedAt ? ` · Ended ${new Date(t.endedAt).toLocaleString()} · Ran ${elapsed((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 1000)}` : ""}`}
+        detail={`Started ${dateTime(Date.parse(t.startedAt), zone)}${t.endedAt ? ` · Ended ${dateTime(Date.parse(t.endedAt), zone)} · Ran ${elapsed((Date.parse(t.endedAt) - Date.parse(t.startedAt)) / 1000)}` : ""}`}
       >
         <Badge status={t.status} />
         <RunAgainButton
@@ -1378,19 +1550,17 @@ function TestDetail({ id }: { id: string }) {
         </div>
       ))}
       <div className="tabs" role="tablist" aria-label="Test views">
-        {["Overview", "Latency", "Connections", "Thresholds", "Scenario"].map(
-          (x) => (
-            <button
-              className={tab === x ? "active" : ""}
-              key={x}
-              role="tab"
-              aria-selected={tab === x}
-              onClick={() => setTab(x)}
-            >
-              {x}
-            </button>
-          ),
-        )}
+        {["Overview", "Thresholds", "Scenario"].map((x) => (
+          <button
+            className={tab === x ? "active" : ""}
+            key={x}
+            role="tab"
+            aria-selected={tab === x}
+            onClick={() => setTab(x)}
+          >
+            {x}
+          </button>
+        ))}
         <span
           className={`stream ${stream}`}
           role="status"
@@ -1418,11 +1588,13 @@ function TestDetail({ id }: { id: string }) {
             label="CONNECTED / TARGET"
             value={
               <>
-                {number(s.connected)}
+                <NumberTicker value={s.connected} format={number} />
                 <em> / {number(s.targetClients)}</em>
               </>
             }
             sub={`${number(s.peakConnected)} peak connected`}
+            spark={series.map((x) => x.snapshot.connected)}
+            sparkZero
             accent
           />
         ) : (
@@ -1435,13 +1607,16 @@ function TestDetail({ id }: { id: string }) {
         )}
         <Metric
           label="PUBLISHED"
-          value={number(s.published)}
+          value={<NumberTicker value={s.published} format={number} />}
           sub={`${number(s.received)} received`}
+          spark={series.map((x) => x.messageRate)}
+          sparkZero
         />
         <Metric
           label="P95 LATENCY"
-          value={latency(s.p95)}
+          value={<NumberTicker value={s.p95} format={latency} />}
           sub={`P99 ${latency(s.p99)}`}
+          spark={series.map((x) => x.snapshot.p95)}
         />
         <Metric
           label="TOTAL ERRORS"
@@ -1460,7 +1635,7 @@ function TestDetail({ id }: { id: string }) {
       )}
       {tab === "Scenario" ? (
         <section className="panel">
-          <pre className="yaml-read">{t.scenario}</pre>
+          <YamlView source={t.scenario} />
         </section>
       ) : tab === "Thresholds" ? (
         <section className="panel">
@@ -1492,54 +1667,44 @@ function TestDetail({ id }: { id: string }) {
             </table>
           ) : (
             <Empty
-              title="No thresholds configured"
+              icon={Gauge}
+            title="No thresholds configured"
               detail="Add thresholds to your scenario to evaluate pass or fail criteria."
             />
           )}
         </section>
       ) : (
         <>
-          <section className="panel">
-            <div className="panel-heading">
-              <h2>
-                {tab === "Latency"
-                  ? "Publish latency · P95"
-                  : tab === "Connections"
-                    ? "Connected clients"
-                    : "Message throughput"}
-              </h2>
-              <span className="chart-key">
-                <i />{" "}
-                {tab === "Latency"
-                  ? "Milliseconds"
-                  : tab === "Connections"
-                    ? "Clients"
-                    : "Messages / second"}
-              </span>
+          {t.thresholds?.length > 0 && (
+            <div
+              className="threshold-strip"
+              role="list"
+              aria-label="Thresholds"
+            >
+              {t.thresholds.map((x) => (
+                <button
+                  key={x.name}
+                  role="listitem"
+                  className={`threshold-chip ${x.passed ? "pass" : "fail"}`}
+                  onClick={() => setTab("Thresholds")}
+                  title={`${x.expression} · observed ${x.observed}`}
+                >
+                  <span className={`check-pill ${x.passed ? "pass" : "fail"}`}>
+                    {x.passed ? "pass" : "fail"}
+                  </span>
+                  {x.name.replace(/_/g, " ")}
+                  <span className="mono">{x.observed}</span>
+                </button>
+              ))}
             </div>
-            {metrics.error ? (
-              <ErrorNotice error={metrics.error} />
-            ) : (
-              <Chart
-                samples={metrics.data || []}
-                label={
-                  tab === "Latency"
-                    ? "P95 latency"
-                    : tab === "Connections"
-                      ? "Connected"
-                      : "Messages / second"
-                }
-                field={
-                  tab === "Latency"
-                    ? "p95"
-                    : tab === "Connections"
-                      ? "connected"
-                      : "messageRate"
-                }
-              />
-            )}
-          </section>
-          {tab === "Latency" && <LatencyPanel snapshot={s} />}
+          )}
+          <div className="chart-grid">
+            <ChartPanel metrics={metrics} field="messageRate" />
+            <ChartPanel metrics={metrics} field="connected" />
+            <ChartPanel metrics={metrics} field="p95" />
+            <ChartPanel metrics={metrics} field="byteRate" />
+          </div>
+          <LatencyPanel snapshot={s} />
           <AddressDistribution snapshot={s} samples={metrics.data || []} />
           <BalancePanel balance={t.balance || liveBalance(brokers.data)} />
           <div className="two-col">
@@ -1587,9 +1752,45 @@ function TestDetail({ id }: { id: string }) {
               ))}
             </section>
           </div>
+          <RunConsole
+            startedAt={t.startedAt}
+            samples={metrics.data || []}
+            events={events.data || []}
+            running={t.status === "running"}
+          />
         </>
       )}
     </>
+  );
+}
+const chartInfo = {
+  messageRate: ["Message throughput", "Messages / second"],
+  connected: ["Connected clients", "Clients"],
+  p95: ["Publish latency · P95", "Latency"],
+  byteRate: ["Bandwidth", "Bytes / second"],
+} as const;
+function ChartPanel({
+  metrics,
+  field,
+}: {
+  metrics: { data?: Sample[]; error: unknown };
+  field: keyof typeof chartInfo;
+}) {
+  const [title, unit] = chartInfo[field];
+  return (
+    <section className="panel">
+      <div className="panel-heading">
+        <h2>{title}</h2>
+        <span className="chart-key">
+          <i /> {unit}
+        </span>
+      </div>
+      {metrics.error ? (
+        <ErrorNotice error={metrics.error} />
+      ) : (
+        <Chart samples={metrics.data || []} label={title} field={field} />
+      )}
+    </section>
   );
 }
 function readStorage<T>(key: string, fallback: T): T {
@@ -1646,7 +1847,8 @@ export function BrokerTelemetry() {
         <div className="loading">Loading broker observations…</div>
       ) : !data?.configured ? (
         <Empty
-          title="EMQX monitoring is not configured"
+          icon={Radio}
+            title="EMQX monitoring is not configured"
           detail="Set the server's EMQX management API URL and API credentials to observe broker-side metrics."
         />
       ) : (
@@ -1699,9 +1901,13 @@ export function BrokerTelemetry() {
           <div className="panel-footer">
             <span>Missing observations are shown as —</span>
             <span>
-              {s?.timestamp
-                ? `Updated ${new Date(s.timestamp).toLocaleTimeString()}`
-                : "No snapshot available"}
+              {s?.timestamp ? (
+                <>
+                  Updated <Stamp at={s.timestamp} format={timeOfDay} />
+                </>
+              ) : (
+                "No snapshot available"
+              )}
             </span>
           </div>
         </>
@@ -1807,7 +2013,8 @@ export function Brokers() {
             ))
           ) : (
             <Empty
-              title="No broker profiles"
+              icon={Database}
+            title="No broker profiles"
               detail="Save a connection to select it in the test wizard."
             />
           )}
@@ -1816,7 +2023,97 @@ export function Brokers() {
     </>
   );
 }
-function Workers() {
+const READY = ["ready", "online", "idle", "active"];
+export function WorkerPicker({
+  workers,
+  selected,
+  onChange,
+  query,
+  onQuery,
+}: {
+  workers: Worker[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  query: string;
+  onQuery: (q: string) => void;
+}) {
+  const many = workers.length > 6;
+  const shown = workers.filter((w) =>
+    workerSearchText(w).includes(query.trim().toLowerCase()),
+  );
+  const ready = shown.filter((w) => READY.includes(w.status));
+  return (
+    <>
+      {many && (
+        <div className="worker-picker-tools">
+          <input
+            type="search"
+            aria-label="Search workers"
+            placeholder="Search workers"
+            value={query}
+            onChange={(e) => onQuery(e.target.value)}
+          />
+          <button
+            disabled={!ready.length}
+            onClick={() =>
+              onChange([...new Set([...selected, ...ready.map((w) => w.id)])])
+            }
+          >
+            Select {query ? "matching" : "all"} ready
+          </button>
+          <button disabled={!selected.length} onClick={() => onChange([])}>
+            Clear
+          </button>
+        </div>
+      )}
+      <div className={many ? "worker-picker-list" : undefined}>
+        {shown.map((w) => (
+          <label className="worker-choice" key={w.id}>
+            <input
+              type="checkbox"
+              aria-label={w.id}
+              checked={selected.includes(w.id)}
+              disabled={!READY.includes(w.status)}
+              onChange={(e) =>
+                onChange(
+                  e.target.checked
+                    ? [...selected, w.id]
+                    : selected.filter((x) => x !== w.id),
+                )
+              }
+            />
+            <span>
+              {w.id}
+              <small>
+                {w.status} · {w.host?.cpus || w.cpuCount} cores
+                {w.host?.os ? ` · ${w.host.os}/${w.host.arch}` : ""}
+              </small>
+            </span>
+          </label>
+        ))}
+        {many && !shown.length && (
+          <small className="subdued">No workers match.</small>
+        )}
+      </div>
+    </>
+  );
+}
+const WORKER_PAGE = 12;
+const workerSearchText = (w: Worker) =>
+  [
+    w.id,
+    w.status,
+    w.host?.hostname,
+    w.host?.os,
+    w.host?.arch,
+    w.host?.distro,
+    w.host?.cpuModel,
+    w.host?.container,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+export function Workers() {
   const workers = useQuery({
     queryKey: ["workers"],
     queryFn: () => request<Worker[]>("/workers"),
@@ -1826,6 +2123,28 @@ function Workers() {
     queryKey: ["doctor"],
     queryFn: () => request<Check[]>("/doctor"),
   });
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(0);
+  const all = workers.data || [];
+  const filtered = all.filter(
+    (w) =>
+      (status === "all" || w.status === status) &&
+      workerSearchText(w).includes(query.trim().toLowerCase()),
+  );
+  const start =
+    Math.min(page, Math.max(0, Math.ceil(filtered.length / WORKER_PAGE) - 1)) *
+    WORKER_PAGE;
+  const shown = filtered.slice(start, start + WORKER_PAGE);
+  const totals = all.reduce(
+    (t, w) => ({
+      ...t,
+      [w.status]: (t[w.status] || 0) + 1,
+      cores: t.cores + (w.host?.cpus || w.cpuCount),
+      clients: t.clients + w.connected,
+    }),
+    { cores: 0, clients: 0 } as Record<string, number>,
+  );
   return (
     <>
       <Title
@@ -1843,35 +2162,82 @@ function Workers() {
         </button>
       </Title>
       {workers.error && <ErrorNotice error={workers.error} />}
+      {all.length > 0 && (
+        <div className="worker-summary" aria-label="Fleet summary">
+          <div>
+            <span>Workers</span>
+            <strong>{number(all.length)}</strong>
+          </div>
+          {["ready", "running", "lost"]
+            .filter((k) => totals[k])
+            .map((k) => (
+              <div key={k} className={`worker-state ${k}`}>
+                <span>{k}</span>
+                <strong>{number(totals[k])}</strong>
+              </div>
+            ))}
+          <div>
+            <span>Total cores</span>
+            <strong>{number(totals.cores)}</strong>
+          </div>
+          <div>
+            <span>Connected clients</span>
+            <strong>{number(totals.clients)}</strong>
+          </div>
+        </div>
+      )}
+      {all.length > WORKER_PAGE && (
+        <div className="worker-tools">
+          <input
+            type="search"
+            aria-label="Search workers"
+            placeholder="Search by ID, host, OS or CPU"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setPage(0);
+            }}
+          />
+          <select
+            aria-label="Filter workers by status"
+            value={status}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(0);
+            }}
+          >
+            <option value="all">All statuses</option>
+            <option value="ready">Ready</option>
+            <option value="running">Running</option>
+            <option value="lost">Lost</option>
+          </select>
+        </div>
+      )}
       <div className="worker-grid">
-        {workers.data?.map((w) => (
-          <section className="panel side-panel" key={w.id}>
-            <div className="worker-heading">
-              <Server size={24} />
-              <Badge status={w.status} />
-            </div>
-            <h2 className="mono">{w.id}</h2>
-            <div className="plan-row">
-              <span>CPU cores</span>
-              <strong>{w.cpuCount}</strong>
-            </div>
-            <div className="plan-row">
-              <span>Process memory</span>
-              <strong>{bytes(w.memoryBytes)}</strong>
-            </div>
-            <div className="plan-row">
-              <span>Connected clients</span>
-              <strong>{number(w.connected)}</strong>
-            </div>
-            <small className="subdued">
-              Last seen {new Date(w.lastSeen).toLocaleString()}
-            </small>
-          </section>
+        {shown.map((w) => (
+          <WorkerCard
+            key={w.id}
+            worker={w}
+            badge={<Badge status={w.status} />}
+          />
         ))}
       </div>
+      {filtered.length > WORKER_PAGE && (
+        <Pager
+          label="Workers"
+          total={filtered.length}
+          page={page}
+          pageSize={WORKER_PAGE}
+          onPage={setPage}
+        />
+      )}
+      {all.length > 0 && filtered.length === 0 && (
+        <p className="subdued worker-none">No workers match this filter.</p>
+      )}
       {!workers.isLoading && !workers.data?.length && !workers.error && (
         <section className="panel">
           <Empty
+            icon={Server}
             title="No workers connected"
             detail="Start the server with a local worker or connect a remote generator."
           />
@@ -1899,7 +2265,7 @@ function Workers() {
               {doctor.data?.map((c) => (
                 <tr key={c.Name}>
                   <td>{c.Name}</td>
-                  <td className="mono">{c.Value}</td>
+                  <td className="mono">{readinessValue(c.Value)}</td>
                   <td>
                     <Badge status={c.Status} />
                   </td>
@@ -1913,6 +2279,11 @@ function Workers() {
     </>
   );
 }
+// Doctor reports raw byte counts; show them in readable units.
+const readinessValue = (value: string) => {
+  const raw = /^(\d+) bytes$/.exec(value);
+  return raw ? bytes(Number(raw[1])) : value;
+};
 const compareLabels: Record<string, string> = {
   peakConnected: "Peak connected",
   published: "Messages published",
@@ -1925,8 +2296,21 @@ const compareLabels: Record<string, string> = {
   p99: "Publish latency P99",
   bytesSent: "Bytes sent",
 };
+// Stamp renders a timestamp in the display time zone chosen in the top bar.
+const timeOfDay = (ms: number, zone: string) => clock(ms, zone).slice(0, 8);
+function Stamp({
+  at,
+  format = dateTime,
+}: {
+  at: string;
+  format?: (ms: number, zone: string) => string;
+}) {
+  const zone = useTimeZone();
+  return <time dateTime={at}>{format(Date.parse(at), zone)}</time>;
+}
 function Compare() {
   const q = useTests();
+  const zone = useTimeZone();
   const [a, setA] = useState("");
   const [b, setB] = useState("");
   const tests = q.data || [];
@@ -1935,7 +2319,7 @@ function Compare() {
     <>
       <Title
         eyebrow="ANALYSIS / COMPARE"
-        title="Put performance in perspective"
+        title="Compare runs"
         detail="Compare two recorded runs using their actual result snapshots."
       />
       {q.error && <ErrorNotice error={q.error} />}
@@ -1953,7 +2337,7 @@ function Compare() {
                 <option value="">Select a run</option>
                 {tests.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name} · {new Date(t.startedAt).toLocaleString()}
+                    {t.name} · {dateTime(Date.parse(t.startedAt), zone)}
                   </option>
                 ))}
               </select>
@@ -1971,7 +2355,7 @@ function Compare() {
                   <th key={i}>
                     {i === 0 ? "A" : "B"} · {t!.name}
                     <small className="compare-when">
-                      {new Date(t!.startedAt).toLocaleString()}
+                      <Stamp at={t!.startedAt} />
                     </small>
                   </th>
                 ))}
@@ -2037,10 +2421,19 @@ function Compare() {
         </section>
       ) : (
         <section className="panel">
-          <Empty
-            title="Choose two runs to compare"
-            detail="A baseline and a candidate reveal changes in throughput, latency, and reliability."
-          />
+          {!q.isLoading && tests.length < 2 ? (
+            <Empty
+              icon={GitCompareArrows}
+              title="Record two runs to compare"
+              detail={`Comparison needs a baseline and a candidate. ${tests.length ? "One run is" : "No runs are"} recorded so far.`}
+            />
+          ) : (
+            <Empty
+              icon={GitCompareArrows}
+              title="Choose two runs to compare"
+              detail="Pick a baseline and a candidate to see differences in throughput, latency, and reliability."
+            />
+          )}
         </section>
       )}
     </>
@@ -2111,6 +2504,7 @@ function Errors() {
           ))
         ) : (
           <Empty
+            icon={CheckCircle2}
             title="No recorded errors"
             detail="Run diagnostics will appear here when the engine reports a failure."
           />
@@ -2129,7 +2523,7 @@ function SettingsPage() {
     <>
       <Title
         eyebrow="WORKSPACE / SETTINGS"
-        title="Make the lab yours"
+        title="Settings"
         detail="Browser preferences and API access for your workspace."
       />
       <section className="panel side-panel settings-panel">
@@ -2189,12 +2583,18 @@ function Shell() {
     () => localStorage.getItem("mqtitan.theme") || "dark",
   );
   const tests = useTests();
+  const path = useRouterState({ select: (state) => state.location.pathname });
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("mqtitan.theme", theme);
   }, [theme]);
   return (
     <div className="app-shell">
+      <div className="ambient" aria-hidden="true">
+        <i />
+        <i />
+        <i />
+      </div>
       <a className="skip-link" href="#main-content">
         Skip to content
       </a>
@@ -2273,19 +2673,13 @@ function Shell() {
             <strong>MQTT performance lab</strong>
           </div>
           <div className="topbar-actions">
+            <TimeZonePicker />
             <span className="environment">
               <i /> LOCAL
             </span>
-            <button
-              aria-label="Create a new test"
-              className="topbar-new"
-              onClick={() => setWizard(true)}
-            >
-              <Plus size={15} /> <span className="label">New test</span>
-            </button>
           </div>
         </header>
-        <main id="main-content" tabIndex={-1}>
+        <main id="main-content" tabIndex={-1} key={path} className="page-enter">
           <PageContent
             tests={tests.data || []}
             error={tests.error}
@@ -2297,9 +2691,7 @@ function Shell() {
           />
         </main>
         <footer>
-          <span>
-            MQTiTan <span className="subdued">/ Engineered for scale.</span>
-          </span>
+          <span>MQTiTan</span>
           <span className="mono">MQTT 3.1.1 · MQTT 5.0</span>
         </footer>
       </div>
@@ -2361,7 +2753,7 @@ function PageContent({
         <>
           <Title
             eyebrow="WORKLOADS / TESTS"
-            title="Every run. Every result."
+            title="Tests"
             detail="Live tests and historical benchmarks in one place."
           >
             <button className="primary" onClick={create}>

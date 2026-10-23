@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/mqtitan/mqtitan/internal/metrics"
+	"github.com/mqtitan/mqtitan/internal/platform"
 )
 
 func register(t *testing.T, r *workerRegistry, id string) string {
@@ -250,4 +252,16 @@ func TestHeartbeatWithFullLabelSetsFitsLimit(t *testing.T) {
 		t.Fatalf("compressed %d, decompressed %d exceed the 2 MiB / 8 MiB bounds", z.Len(), raw.Len())
 	}
 	t.Logf("compressed %d bytes, decompressed %d bytes", z.Len(), raw.Len())
+}
+
+func TestRegisterCleansSelfReportedHost(t *testing.T) {
+	r := newWorkerRegistry()
+	long := strings.Repeat("x", 300)
+	if _, err := r.register(Worker{ID: "w", Host: &platform.Host{CPUModel: "EPYC\x1b[31m" + long, OS: "linux", CPUs: -4, CPULimit: -1}}); err != nil {
+		t.Fatal(err)
+	}
+	h := r.list()[0].Host
+	if strings.ContainsRune(h.CPUModel, '\x1b') || len([]rune(h.CPUModel)) != 128 || h.CPUs != 0 || h.CPULimit != 0 || h.OS != "linux" {
+		t.Fatalf("host not cleaned: %+v", h)
+	}
 }

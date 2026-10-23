@@ -280,21 +280,22 @@ export function CertificateSettings({
             browser storage. Distributed workers receive key material in memory;
             use HTTPS for their controller connection.
           </p>
-          <button type="button" onClick={upload}>
-            {busy ? "Validating & saving…" : "Save certificate profile"}
-          </button>
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => {
-              setFiles({});
-              setFileGeneration((previous) => previous + 1);
-              setError("");
-              setName("");
-            }}
-          >
-            Clear selected files
-          </button>
+          <div className="tls-upload-actions">
+            <button type="button" className="primary" onClick={upload}>
+              {busy ? "Validating & saving…" : "Save certificate profile"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFiles({});
+                setFileGeneration((previous) => previous + 1);
+                setError("");
+                setName("");
+              }}
+            >
+              Clear selected files
+            </button>
+          </div>
         </div>
       )}
       {error && (

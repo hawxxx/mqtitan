@@ -113,6 +113,12 @@ export interface Balance {
   zoneSkew: number;
   zoneRatio: number | null;
 }
+export interface LogEvent {
+  seq: number;
+  time: string;
+  level: "info" | "action" | "warn" | "error";
+  message: string;
+}
 export interface Sample {
   timestamp: string;
   snapshot: Snapshot;
@@ -132,6 +138,27 @@ export interface Worker {
   memoryBytes: number;
   connected: number;
   lastSeen: string;
+  clockOffsetMs: number;
+  supportsLiveControl?: boolean;
+  host?: WorkerHost;
+}
+export interface WorkerHost {
+  hostname?: string;
+  os: string;
+  arch: string;
+  distro?: string;
+  kernel?: string;
+  cpuModel?: string;
+  cpus: number;
+  cpuLimit?: number;
+  memoryTotalBytes?: number;
+  memoryLimitBytes?: number;
+  openFiles?: number;
+  ephemeralPorts?: number;
+  container?: string;
+  goVersion: string;
+  version?: string;
+  startedAt: string;
 }
 export interface Check {
   Name: string;
@@ -236,7 +263,7 @@ export const bytes = (n: number) => {
       ? `${(n / 1048576).toFixed(1)} MB`
       : size >= 1024
         ? `${(n / 1024).toFixed(1)} KB`
-        : `${n || 0} B`;
+        : `${Math.round(n || 0)} B`;
 };
 // Elapsed seconds as m:ss or h:mm:ss for chart axes and run durations.
 export const elapsed = (seconds: number) => {
