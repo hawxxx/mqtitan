@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/hawxxx/mqtitan/compare/v0.3.0...v0.4.0) (2026-10-23)
+
+
+### Features
+
+* web UI refresh, run log and worker host details ([#35](https://github.com/hawxxx/mqtitan/issues/35)) ([70e9943](https://github.com/hawxxx/mqtitan/commit/70e99436a4c37cecd95f5e3c518c9ba16ee29ece))
+
 ## [0.3.0](https://github.com/hawxxx/mqtitan/compare/v0.2.1...v0.3.0) (2026-10-22)
 
 
