@@ -203,7 +203,8 @@ func (s Scenario) idleWarnings() []string {
 }
 
 // portWarning flags more clients per worker than the source ports available
-// towards the broker addresses.
+// towards the broker addresses. PlanOptions.SourcePorts replaces the default
+// budget with the range workers report.
 func (s Scenario) portWarning(peak int, o PlanOptions) string {
 	workers := max(o.Workers, 1)
 	dest := o.Destinations
@@ -211,12 +212,16 @@ func (s Scenario) portWarning(peak int, o PlanOptions) string {
 		dest = max(len(s.Broker.AddressLabels), 1)
 	}
 	per := (peak + workers - 1) / workers
-	if per <= maxSourcePorts*dest {
+	ports := maxSourcePorts
+	if o.SourcePorts > 0 {
+		ports = o.SourcePorts
+	}
+	if per <= ports*dest {
 		return ""
 	}
 	noun := "addresses"
 	if dest == 1 {
 		noun = "address"
 	}
-	return fmt.Sprintf("%d clients per worker exceed ~%d source ports x %d destination %s; add workers or broker addresses", per, maxSourcePorts, dest, noun)
+	return fmt.Sprintf("%d clients per worker exceed ~%d source ports x %d destination %s; add workers or broker addresses", per, ports, dest, noun)
 }

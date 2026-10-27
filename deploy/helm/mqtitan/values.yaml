@@ -27,6 +27,8 @@ worker:
   topologySpreadConstraints: []
   hostAliases: []
   dnsConfig: {}
+  # Namespaced sysctls, e.g. widen the ephemeral port range (safe sysctl on Kubernetes 1.27+).
+  sysctls: []
 ingress:
   enabled: false
   className: ""

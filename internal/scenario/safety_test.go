@@ -225,6 +225,12 @@ func TestSourcePortWarning(t *testing.T) {
 	if w := s.Plan().Warnings; len(w) != 0 {
 		t.Fatalf("labels: %q", w)
 	}
+	if w := s.PlanWith(PlanOptions{Destinations: 1, SourcePorts: 64000}).Warnings; len(w) != 0 {
+		t.Fatalf("reported range: %q", w)
+	}
+	if w := s.PlanWith(PlanOptions{Destinations: 1, SourcePorts: 10000}).Warnings; len(w) != 1 || !strings.Contains(w[0], "~10000 source ports") {
+		t.Fatalf("small range: %q", w)
+	}
 	if w := s.PlanWith(PlanOptions{Destinations: 1}).Warnings; len(w) != 1 {
 		t.Fatalf("override: %q", w)
 	}

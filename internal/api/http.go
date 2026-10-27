@@ -245,7 +245,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 			writeError(w, 400, "INVALID_SCENARIO", err.Error())
 			return
 		}
-		p := s.PlanWith(scenario.PlanOptions{Workers: workers})
+		p := s.PlanWith(scenario.PlanOptions{Workers: workers, SourcePorts: m.workers.minEphemeralPorts()})
 		checks := platform.AssessPlan(platform.PlanInputs{Clients: int64(p.PeakClients), FileDescriptors: int64(p.EstimatedFileDescriptors), MemoryBytes: p.EstimatedMemoryBytes, WireBytesPerSecond: p.EstimatedWireBytesPerSecond}, platform.CurrentCapacity())
 		writeJSON(w, 200, struct {
 			scenario.Plan
