@@ -402,6 +402,7 @@ type Plan struct {
 type PlanOptions struct {
 	Workers      int // zero means 1
 	Destinations int // resolved broker addresses; zero derives from addressLabels, else 1
+	SourcePorts  int // ephemeral ports per source address and destination; zero means the default budget
 }
 
 func (s Scenario) Plan() Plan { return s.PlanWith(PlanOptions{}) }

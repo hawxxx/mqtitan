@@ -75,7 +75,15 @@ worker:
       hostnames: [broker.example.com]
 ```
 
-List one entry per address to spread connections. Pin load balancer IPs with explicit subnet mappings or they can change. A private DNS zone is more robust where you control DNS; `worker.dnsConfig` accepts native pod DNS configuration.
+Each worker can also hold at most about one connection per ephemeral port to each broker address. Widen the range with a namespaced sysctl, which Kubernetes 1.27+ allows by default; the worker health port 8081 is excluded here so it cannot collide:
+
+```yaml
+worker:
+  sysctls:
+    - {name: net.ipv4.ip_local_port_range, value: "10240 65535"}
+```
+
+Workers report the range they see, and the controller's plan warning uses the smallest reported value in place of its conservative 25,000 default. List one entry per address to spread connections. Pin load balancer IPs with explicit subnet mappings or they can change. A private DNS zone is more robust where you control DNS; `worker.dnsConfig` accepts native pod DNS configuration.
 
 Ingress is optional. Configure ingress.className, ingress.host and ingress.tlsSecret to terminate HTTPS; bearer tokens must travel over encrypted connections. The controller has /healthz and /readyz probes on port 8080. Workers expose the same paths on port 8081 via --health-listen; readiness reflects controller communication. Controller heartbeats and leases separately detect unavailable execution capacity.
 

@@ -156,6 +156,22 @@ func (r *workerRegistry) list() []Worker {
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
+
+// minEphemeralPorts is the smallest ephemeral port range reported by a live
+// worker, or zero when none reports one.
+func (r *workerRegistry) minEphemeralPorts() int {
+	low := 0
+	for _, w := range r.list() {
+		if w.Status == "lost" || w.Host == nil || w.Host.EphemeralPorts == 0 {
+			continue
+		}
+		if p := int(min(w.Host.EphemeralPorts, 1<<31-1)); low == 0 || p < low {
+			low = p
+		}
+	}
+	return low
+}
+
 func (r *workerRegistry) heartbeat(h Heartbeat) (HeartbeatResponse, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
