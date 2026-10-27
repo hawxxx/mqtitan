@@ -25,6 +25,8 @@ worker:
   nodeSelector: {}
   affinity: {}
   topologySpreadConstraints: []
+  hostAliases: []
+  dnsConfig: {}
 ingress:
   enabled: false
   className: ""

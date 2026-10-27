@@ -62,6 +62,21 @@ networkPolicy:
 
 worker.nodeSelector and worker.affinity also accept native Kubernetes configuration. Zone spreading requires nodes carrying zone labels. Place workers near brokers when measuring broker capacity, and deliberately vary zones when measuring network effects.
 
+### Avoiding NAT connection limits
+
+A NAT gateway caps simultaneous connections to one destination IP and port (AWS: 55,000). Workers reaching a broker through NAT hit this ceiling during large tests. Prefer private routing to the broker. If DNS resolves the broker name to public addresses, `worker.hostAliases` can pin the name to private addresses, such as an internal load balancer's, so traffic skips NAT while TLS still validates against the hostname:
+
+```yaml
+worker:
+  hostAliases:
+    - ip: 10.0.1.10
+      hostnames: [broker.example.com]
+    - ip: 10.0.2.10
+      hostnames: [broker.example.com]
+```
+
+List one entry per address to spread connections. Pin load balancer IPs with explicit subnet mappings or they can change. A private DNS zone is more robust where you control DNS; `worker.dnsConfig` accepts native pod DNS configuration.
+
 Ingress is optional. Configure ingress.className, ingress.host and ingress.tlsSecret to terminate HTTPS; bearer tokens must travel over encrypted connections. The controller has /healthz and /readyz probes on port 8080. Workers expose the same paths on port 8081 via --health-listen; readiness reflects controller communication. Controller heartbeats and leases separately detect unavailable execution capacity.
 
 serviceMonitor.enabled requires Prometheus Operator CRDs. It scrapes /metrics using the same Secret bearer credential. Configure Prometheus's ServiceMonitor selector to include this release. The single-controller PDB blocks voluntary eviction while that controller is running; coordinate node maintenance, backups and upgrades, and expect downtime during the Recreate rollout.
