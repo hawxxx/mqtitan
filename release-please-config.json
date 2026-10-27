@@ -6,7 +6,10 @@
   "include-component-in-tag": false,
   "packages": {
     ".": {
-      "extra-files": ["deploy/helm/mqtitan/Chart.yaml"]
+      "extra-files": [
+        {"type": "yaml", "path": "deploy/helm/mqtitan/Chart.yaml", "jsonpath": "$.version"},
+        {"type": "yaml", "path": "deploy/helm/mqtitan/Chart.yaml", "jsonpath": "$.appVersion"}
+      ]
     }
   }
 }
