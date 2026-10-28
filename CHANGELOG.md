@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/hawxxx/mqtitan/compare/v0.4.0...v0.5.0) (2026-10-27)
+
+
+### Features
+
+* **chart:** add worker hostAliases and dnsConfig ([#47](https://github.com/hawxxx/mqtitan/issues/47)) ([b451bc1](https://github.com/hawxxx/mqtitan/commit/b451bc177dff9e22edf1524c44cba46ac2cab9f1))
+* use worker-reported ephemeral port range and add worker sysctls ([#50](https://github.com/hawxxx/mqtitan/issues/50)) ([bb5e4d5](https://github.com/hawxxx/mqtitan/commit/bb5e4d552b29c4fc9f9ffe43dd6c75dc9f646766))
+
+
+### Bug Fixes
+
+* **release:** bump chart appVersion with release-please ([#49](https://github.com/hawxxx/mqtitan/issues/49)) ([33ad570](https://github.com/hawxxx/mqtitan/commit/33ad570a26db35a8696163ac04803b60a839bff6))
+
 ## [0.4.0](https://github.com/hawxxx/mqtitan/compare/v0.3.0...v0.4.0) (2026-10-23)
 
 
