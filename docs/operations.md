@@ -100,6 +100,8 @@ controller:
       valueFrom: {secretKeyRef: {name: mqtitan-basic, key: password}}
 ```
 
+The chart's NetworkPolicy is enabled by default and only allows DNS, controller traffic and `networkPolicy.brokerEgress`. OIDC discovery runs at controller startup, so without an egress rule to the identity provider (for example an `ipBlock` on port 443 added through `networkPolicy.brokerEgress`) the controller fails to start with `OIDC discovery failed`. The same applies to any other external endpoint the controller must reach, such as EMQX or Prometheus.
+
 `controller.hostAliases` and `controller.dnsConfig` mirror the worker options for clusters where the controller needs custom name resolution.
 
 ## Persistence and recovery
