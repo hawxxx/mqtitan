@@ -13,6 +13,10 @@ controller:
   resources:
     requests: {cpu: 250m, memory: 256Mi}
     limits: {cpu: "2", memory: 2Gi}
+  # Extra container env entries, e.g. MQTITAN_OIDC_ISSUER or secretKeyRef-backed values.
+  extraEnv: []
+  hostAliases: []
+  dnsConfig: {}
 persistence:
   enabled: true
   size: 10Gi

@@ -89,6 +89,21 @@ Ingress is optional. Configure ingress.className, ingress.host and ingress.tlsSe
 
 serviceMonitor.enabled requires Prometheus Operator CRDs. It scrapes /metrics using the same Secret bearer credential. Configure Prometheus's ServiceMonitor selector to include this release. The single-controller PDB blocks voluntary eviction while that controller is running; coordinate node maintenance, backups and upgrades, and expect downtime during the Recreate rollout.
 
+In the Helm chart, pass authentication settings to the controller with `controller.extraEnv`, which takes native Kubernetes env entries so secrets can come from `secretKeyRef`:
+
+```yaml
+controller:
+  extraEnv:
+    - {name: MQTITAN_OIDC_ISSUER, value: "https://idp.example.com"}
+    - {name: MQTITAN_OIDC_CLIENT_ID, value: mqtitan}
+    - name: MQTITAN_BASIC_PASSWORD
+      valueFrom: {secretKeyRef: {name: mqtitan-basic, key: password}}
+```
+
+The chart's NetworkPolicy is enabled by default and only allows DNS, controller traffic and `networkPolicy.brokerEgress`. OIDC discovery runs at controller startup, so without an egress rule to the identity provider (for example an `ipBlock` on port 443 added through `networkPolicy.brokerEgress`) the controller fails to start with `OIDC discovery failed`. The same applies to any other external endpoint the controller must reach, such as EMQX or Prometheus.
+
+`controller.hostAliases` and `controller.dnsConfig` mirror the worker options for clusters where the controller needs custom name resolution.
+
 ## Persistence and recovery
 
 Keep the SQLite database, WAL and SHM files on the same writable persistent filesystem. Back up using SQLite's online backup facilities or stop the controller cleanly before copying the database. A plain copy of a live database without its WAL can omit recent transactions. Exercise restores before relying on backups. Monitor disk space and external retention requirements; unlimited run history can exhaust the volume.
