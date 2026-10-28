@@ -97,7 +97,8 @@ button:focus-visible,
 a:focus-visible {
   outline: 2px solid var(--teal);
 }
-button {
+button,
+a.button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -111,7 +112,8 @@ button {
   font-weight: 500;
   white-space: nowrap;
 }
-button:hover {
+button:hover,
+a.button:hover {
   background: var(--hover);
   border-color: #48606a;
 }
@@ -119,13 +121,15 @@ button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
-button.primary {
+button.primary,
+a.button.primary {
   color: #071a15;
   background: var(--teal);
   border-color: var(--teal);
   font-weight: 700;
 }
-button.primary:hover {
+button.primary:hover,
+a.button.primary:hover {
   background: #65decb;
 }
 button.danger {
@@ -863,8 +867,27 @@ footer > .mono {
   font-size: 12px;
   margin-top: 4px;
 }
-.notice button {
+.notice button,
+.notice a.button {
   margin-left: auto;
+}
+a.button {
+  text-decoration: none;
+}
+.notice.sign-in {
+  border-color: var(--line);
+  background: var(--panel);
+  color: var(--text);
+}
+.session-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.session-user button {
+  padding: 5px 7px;
 }
 .loading {
   display: flex;

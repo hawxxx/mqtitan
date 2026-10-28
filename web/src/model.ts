@@ -296,6 +296,27 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
     );
   return body.data as T;
 }
+export type AuthSession = {
+  enabled: boolean;
+  login: boolean;
+  authenticated: boolean;
+  user?: { subject: string; name?: string; email?: string; method: string };
+};
+// Session status lives outside /api/v1 so it answers before sign-in.
+export async function authSession(): Promise<AuthSession> {
+  const res = await fetch("/auth/session", { headers: headers() });
+  if (!res.ok) throw new Error(`Session check failed (${res.status})`);
+  return (await res.json()).data as AuthSession;
+}
+export function signInURL(next = location.pathname + location.search) {
+  return `/auth/login?next=${encodeURIComponent(next)}`;
+}
+export async function signOut() {
+  sessionStorage.removeItem("mqtitan.token");
+  const res = await fetch("/auth/logout", { method: "POST" });
+  const body = await res.json().catch(() => ({}));
+  location.assign(body.data?.redirect || "/");
+}
 export async function download(id: string, format: string) {
   const res = await fetch(
     `/api/v1/tests/${encodeURIComponent(id)}/export?format=${format}`,

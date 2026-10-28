@@ -137,3 +137,15 @@ func TestCrossOriginMutationRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthRoutesBypassAPIAuthentication(t *testing.T) {
+	m, _ := setup(t)
+	auth := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]bool{"login": true}) })
+	h := Handler(m, Options{Token: "control", AuthRoutes: auth})
+	if got := call(h, "GET", "/auth/session", "", "").Code; got != 200 {
+		t.Fatalf("auth route without credentials = %d, want 200", got)
+	}
+	if got := call(h, "GET", "/api/v1/tests", "", "").Code; got != 401 {
+		t.Fatalf("API without credentials = %d, want 401", got)
+	}
+}

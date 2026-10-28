@@ -58,9 +58,9 @@ type localServer struct {
 
 func openServer(o runOptions) (*localServer, error) {
 	token := os.Getenv("MQTITAN_TOKEN")
-	authConfig := authn.Config{Token: token, BasicUsername: os.Getenv("MQTITAN_BASIC_USERNAME"), BasicPassword: os.Getenv("MQTITAN_BASIC_PASSWORD"), OIDCIssuer: os.Getenv("MQTITAN_OIDC_ISSUER"), OIDCClientID: os.Getenv("MQTITAN_OIDC_CLIENT_ID"), ProxyHeader: os.Getenv("MQTITAN_PROXY_IDENTITY_HEADER")}
-	if cidrs := os.Getenv("MQTITAN_TRUSTED_PROXY_CIDRS"); cidrs != "" {
-		authConfig.TrustedProxyCIDRs = strings.Split(cidrs, ",")
+	authConfig, err := authConfigFromEnv(token)
+	if err != nil {
+		return nil, err
 	}
 	authMarker := token
 	if authConfig.Enabled() {
@@ -70,7 +70,7 @@ func openServer(o runOptions) (*localServer, error) {
 		return nil, err
 	}
 	authCtx, authCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	authorize, authErr := authn.New(authCtx, authConfig)
+	authenticator, authErr := authn.New(authCtx, authConfig)
 	authCancel()
 	if authErr != nil {
 		return nil, authErr
@@ -96,7 +96,7 @@ func openServer(o runOptions) (*localServer, error) {
 		return nil, err
 	}
 	assets, _ := web.FS()
-	apiOptions := api.Options{Token: token, WorkerToken: os.Getenv("MQTITAN_WORKER_TOKEN"), WebFS: assets, Authorize: authorize, LoopbackOnly: !authConfig.Enabled() && !o.AllowRemote}
+	apiOptions := api.Options{Token: token, WorkerToken: os.Getenv("MQTITAN_WORKER_TOKEN"), WebFS: assets, Authorize: authenticator.Authorize, AuthRoutes: authenticator.Routes(), LoopbackOnly: !authConfig.Enabled() && !o.AllowRemote}
 	if o.Web != "" {
 		apiOptions.WebFS = nil
 		apiOptions.WebDir = o.Web
@@ -106,6 +106,27 @@ func openServer(o runOptions) (*localServer, error) {
 	l := &localServer{m, s, srv, make(chan error, 1), listener.Addr().String()}
 	go func() { l.errors <- srv.Serve(listener) }()
 	return l, nil
+}
+
+// authConfigFromEnv reads the controller authentication settings.
+func authConfigFromEnv(token string) (authn.Config, error) {
+	c := authn.Config{Token: token, BasicUsername: os.Getenv("MQTITAN_BASIC_USERNAME"), BasicPassword: os.Getenv("MQTITAN_BASIC_PASSWORD"), ProxyHeader: os.Getenv("MQTITAN_PROXY_IDENTITY_HEADER"), TrustedProxyCIDRs: envList("MQTITAN_TRUSTED_PROXY_CIDRS"),
+		OIDCIssuer: os.Getenv("MQTITAN_OIDC_ISSUER"), OIDCClientID: os.Getenv("MQTITAN_OIDC_CLIENT_ID"), OIDCClientSecret: os.Getenv("MQTITAN_OIDC_CLIENT_SECRET"), OIDCRedirectURL: os.Getenv("MQTITAN_OIDC_REDIRECT_URL"), OIDCPostLogoutRedirectURL: os.Getenv("MQTITAN_OIDC_POST_LOGOUT_REDIRECT_URL"),
+		OIDCScopes: envList("MQTITAN_OIDC_SCOPES"), OIDCAudiences: envList("MQTITAN_OIDC_AUDIENCES"), OIDCAllowedGroups: envList("MQTITAN_OIDC_ALLOWED_GROUPS"), OIDCGroupsClaim: os.Getenv("MQTITAN_OIDC_GROUPS_CLAIM"), OIDCUsernameClaim: os.Getenv("MQTITAN_OIDC_USERNAME_CLAIM"),
+		OIDCCookieSecret: os.Getenv("MQTITAN_OIDC_COOKIE_SECRET"), OIDCCAFile: os.Getenv("MQTITAN_OIDC_CA_FILE")}
+	if v := os.Getenv("MQTITAN_OIDC_SESSION_TTL"); v != "" {
+		ttl, err := time.ParseDuration(v)
+		if err != nil || ttl < time.Minute {
+			return c, errors.New("MQTITAN_OIDC_SESSION_TTL must be a duration of at least 1m")
+		}
+		c.OIDCSessionTTL = ttl
+	}
+	return c, nil
+}
+
+// envList splits a comma- or space-separated environment variable.
+func envList(name string) []string {
+	return strings.FieldsFunc(os.Getenv(name), func(r rune) bool { return r == ',' || r == ' ' })
 }
 func (s *localServer) Close() {
 	s.manager.Close()

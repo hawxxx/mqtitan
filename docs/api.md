@@ -5,6 +5,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/healthz`, `/readyz` | Process probes, not broker capacity certification |
+| GET / POST | `/auth/session`, `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC browser sign-in and session status, outside `/api/v1`; see [authentication](authentication.md#endpoints) |
 | GET | `/metrics` | Prometheus aggregates, including `emqxload_connect_failures_total{stage}` and `emqxload_connack_refusals_total{code}`, `emqxload_churned_total` and `emqxload_churn_reconnects_total`, and for the latest test with telemetry `emqxload_broker_connections{target,zone}`, `emqxload_broker_connection_cv`, `emqxload_zone_connection_skew_ratio` and `emqxload_broker_telemetry_complete`. Tests carry `balance` (peak sample statistics; ratios are `null` when infinite) |
 | POST / GET | `/api/v1/tests` | Start / list tests |
 | GET | `/api/v1/tests/{id}` | Status and metadata |
@@ -60,6 +61,6 @@ In CSV exports the `connect_failures` column is formatted `stage=n;stage=n`. See
 
 ## Security
 
-Configured authentication protects `/api/*` and `/metrics`; probes remain accessible. Bearer clients send `Authorization: Bearer TOKEN`. Do not commit tokens. Remote deployments need TLS at the reverse proxy; the HTTP listener does not itself provide HTTPS. Browser mutations with an `Origin` header must match the request origin; native clients can omit that header.
+Configured authentication protects `/api/*` and `/metrics`; probes remain accessible. Bearer clients send `Authorization: Bearer TOKEN`, where the token is `MQTITAN_TOKEN` or a JWT from the configured OIDC issuer. Browsers signed in through OIDC send a session cookie instead; cookie-authenticated mutations must come from the controller's own origin. Do not commit tokens. Remote deployments need TLS at the reverse proxy; the HTTP listener does not itself provide HTTPS. Browser mutations with an `Origin` header must match the request origin; native clients can omit that header.
 
 Certificate upload accepts `name`, optional `caPem`, and paired `certPem`/`keyPem`. Listing returns metadata, not private keys. Read [certificate security](certificates.md) first. General scenario/profile deletion and role-based access controls are not implemented.

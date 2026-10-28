@@ -29,7 +29,7 @@ docker compose ps
 docker compose logs --tail=50 controller
 ```
 
-Keep these variables available for later Compose commands and subsequent startups. Do not commit them. Open http://127.0.0.1:8080, go to **Settings**, and enter `MQTITAN_TOKEN`. The browser keeps it for the session. The EMQX development dashboard is at http://127.0.0.1:18083; its password is the separate EMQX secret.
+Keep these variables available for later Compose commands and subsequent startups. Do not commit them. Open http://127.0.0.1:8080, go to **Settings**, and enter `MQTITAN_TOKEN`. The browser keeps it for the session. To sign in through an identity provider instead, add the `MQTITAN_OIDC_*` variables from [authentication](authentication.md) to the controller's environment. The EMQX development dashboard is at http://127.0.0.1:18083; its password is the separate EMQX secret.
 
 ## Run a first test
 

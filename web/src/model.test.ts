@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bytes, elapsed, makeScenario, latency, request, runWarnings, type Test } from "./model";
+import { bytes, elapsed, makeScenario, latency, request, runWarnings, signInURL, type Test } from "./model";
 import { parse } from "yaml";
 describe("scenario wizard", () => {
   it("allows spare client capacity for later live increases", () => {
@@ -142,5 +142,10 @@ describe("run warnings", () => {
     expect(
       runWarnings({ ...base, snapshot: { publishAttempts: 1000, publishSlotsMissed: 1, correlationRejected: 26, correlationSamples: 780000 } } as unknown as Test),
     ).toEqual([]);
+  });
+});
+describe("single sign-on", () => {
+  it("keeps the sign-in return path on this origin", () => {
+    expect(signInURL("/tests?id=1")).toBe("/auth/login?next=%2Ftests%3Fid%3D1");
   });
 });

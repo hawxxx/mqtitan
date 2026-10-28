@@ -39,6 +39,43 @@ spec:
                   name: {{ .Values.auth.existingSecret }}
                   key: {{ .Values.auth.workerKey }}
             {{- end }}
+            {{- with .Values.auth.oidc }}
+            {{- if .enabled }}
+            - {name: MQTITAN_OIDC_ISSUER, value: {{ required "auth.oidc.issuer is required" .issuer | quote }}}
+            - {name: MQTITAN_OIDC_CLIENT_ID, value: {{ required "auth.oidc.clientId is required" .clientId | quote }}}
+            - {name: MQTITAN_OIDC_REDIRECT_URL, value: {{ .redirectUrl | default (printf "https://%s/auth/callback" $.Values.ingress.host) | quote }}}
+            {{- if .postLogoutRedirectUrl }}
+            - {name: MQTITAN_OIDC_POST_LOGOUT_REDIRECT_URL, value: {{ .postLogoutRedirectUrl | quote }}}
+            {{- end }}
+            {{- if .scopes }}
+            - {name: MQTITAN_OIDC_SCOPES, value: {{ join "," .scopes | quote }}}
+            {{- end }}
+            {{- if .audiences }}
+            - {name: MQTITAN_OIDC_AUDIENCES, value: {{ join "," .audiences | quote }}}
+            {{- end }}
+            {{- if .allowedGroups }}
+            - {name: MQTITAN_OIDC_ALLOWED_GROUPS, value: {{ join "," .allowedGroups | quote }}}
+            {{- end }}
+            {{- if .groupsClaim }}
+            - {name: MQTITAN_OIDC_GROUPS_CLAIM, value: {{ .groupsClaim | quote }}}
+            {{- end }}
+            {{- if .usernameClaim }}
+            - {name: MQTITAN_OIDC_USERNAME_CLAIM, value: {{ .usernameClaim | quote }}}
+            {{- end }}
+            {{- if .sessionTTL }}
+            - {name: MQTITAN_OIDC_SESSION_TTL, value: {{ .sessionTTL | quote }}}
+            {{- end }}
+            {{- if .existingSecret }}
+            - name: MQTITAN_OIDC_CLIENT_SECRET
+              valueFrom: {secretKeyRef: {name: {{ .existingSecret }}, key: {{ .clientSecretKey }}, optional: true}}
+            - name: MQTITAN_OIDC_COOKIE_SECRET
+              valueFrom: {secretKeyRef: {name: {{ .existingSecret }}, key: {{ .cookieSecretKey }}, optional: true}}
+            {{- end }}
+            {{- if .caConfigMap }}
+            - {name: MQTITAN_OIDC_CA_FILE, value: /etc/mqtitan/oidc-ca/ca.crt}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.controller.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -48,10 +85,19 @@ spec:
           livenessProbe: {httpGet: {path: /healthz, port: http}, initialDelaySeconds: 10, periodSeconds: 10}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
-          volumeMounts: [{name: data, mountPath: /data}, {name: tmp, mountPath: /tmp}]
+          volumeMounts:
+            - {name: data, mountPath: /data}
+            - {name: tmp, mountPath: /tmp}
+            {{- if and .Values.auth.oidc.enabled .Values.auth.oidc.caConfigMap }}
+            - {name: oidc-ca, mountPath: /etc/mqtitan/oidc-ca, readOnly: true}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        {{- if and .Values.auth.oidc.enabled .Values.auth.oidc.caConfigMap }}
+        - name: oidc-ca
+          configMap: {name: {{ .Values.auth.oidc.caConfigMap }}}
+        {{- end }}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim: {claimName: "{{ .Release.Name }}"}

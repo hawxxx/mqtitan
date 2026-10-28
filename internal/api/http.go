@@ -34,6 +34,9 @@ type Options struct {
 	WebDir      string
 	WebFS       fs.FS
 	Authorize   func(*http.Request) bool
+	// AuthRoutes serves /auth/ (OIDC browser sign-in and session status)
+	// outside the API authentication check.
+	AuthRoutes http.Handler
 	// LoopbackOnly rejects API requests whose Host header is not a loopback
 	// name or address. An unauthenticated loopback controller relies on it:
 	// a DNS-rebinding page sends a matching Host and Origin of its own, so
@@ -302,6 +305,9 @@ func Handler(m *Manager, opts Options) http.Handler {
 	m.eventRoutes(mux)
 	m.rerunRoutes(mux)
 	m.brokerRoute(mux)
+	if opts.AuthRoutes != nil {
+		mux.Handle("/auth/", opts.AuthRoutes)
+	}
 	if opts.WebDir != "" || opts.WebFS != nil {
 		assets := opts.WebFS
 		if assets == nil {

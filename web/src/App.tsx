@@ -50,6 +50,8 @@ import {
   Gauge,
   GitCompareArrows,
   LayoutDashboard,
+  LogIn,
+  LogOut,
   Play,
   Plus,
   Radio,
@@ -69,6 +71,7 @@ import {
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import {
+  authSession,
   bytes,
   download,
   elapsed,
@@ -78,6 +81,8 @@ import {
   makeScenario,
   number,
   request,
+  signInURL,
+  signOut,
   type Check,
   type FleetSample,
   type LogEvent,
@@ -104,6 +109,30 @@ function useTests() {
     queryFn: () => request<Test[]>("/tests"),
     refetchInterval: 3000,
   });
+}
+function useAuthSession() {
+  return useQuery({
+    queryKey: ["auth-session"],
+    queryFn: authSession,
+    staleTime: 60_000,
+  });
+}
+function SignInNotice() {
+  return (
+    <div className="notice sign-in" role="alert">
+      <ShieldCheck size={18} />
+      <div>
+        <strong>Sign-in required</strong>
+        <p>
+          This controller uses single sign-on. Sign in with your identity
+          provider, or enter an API token in Settings.
+        </p>
+      </div>
+      <a className="button primary" href={signInURL()}>
+        <LogIn size={14} /> Sign in with SSO
+      </a>
+    </div>
+  );
 }
 function Empty({
   title,
@@ -2521,6 +2550,8 @@ function SettingsPage() {
   );
   const [message, setMessage] = useState("");
   const qc = useQueryClient();
+  const session = useAuthSession();
+  const user = session.data?.user;
   return (
     <>
       <Title
@@ -2529,6 +2560,33 @@ function SettingsPage() {
         detail="Browser preferences and API access for your workspace."
       />
       <section className="panel side-panel settings-panel">
+        {session.data?.login && (
+          <>
+            <h2>Single sign-on</h2>
+            {user?.method === "oidc" ? (
+              <>
+                <p>
+                  Signed in as <strong>{user.name || user.subject}</strong>
+                  {user.email && ` (${user.email})`}.
+                </p>
+                <button onClick={() => void signOut()}>
+                  <LogOut size={14} /> Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <p>
+                  Sign in with the identity provider configured for this
+                  controller.
+                </p>
+                <a className="button primary" href={signInURL("/settings")}>
+                  <LogIn size={14} /> Sign in with SSO
+                </a>
+              </>
+            )}
+            <div className="settings-rule" />
+          </>
+        )}
         <h2>API authentication</h2>
         <p>
           If the server uses MQTITAN_TOKEN, enter its token here. It is kept for
@@ -2585,7 +2643,13 @@ function Shell() {
     () => localStorage.getItem("mqtitan.theme") || "dark",
   );
   const tests = useTests();
+  const session = useAuthSession();
   const path = useRouterState({ select: (state) => state.location.pathname });
+  const user = session.data?.user;
+  const needsSignIn =
+    session.data?.login &&
+    !session.data.authenticated &&
+    !sessionStorage.getItem("mqtitan.token");
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("mqtitan.theme", theme);
@@ -2676,12 +2740,28 @@ function Shell() {
           </div>
           <div className="topbar-actions">
             <TimeZonePicker />
+            {user?.method === "oidc" && (
+              <span
+                className="session-user"
+                title={user.email || user.subject}
+              >
+                {user.name || user.email || user.subject}
+                <button
+                  aria-label="Sign out"
+                  title="Sign out"
+                  onClick={() => void signOut()}
+                >
+                  <LogOut size={14} />
+                </button>
+              </span>
+            )}
             <span className="environment">
               <i /> LOCAL
             </span>
           </div>
         </header>
         <main id="main-content" tabIndex={-1} key={path} className="page-enter">
+          {needsSignIn && path !== "/settings" && <SignInNotice />}
           <PageContent
             tests={tests.data || []}
             error={tests.error}

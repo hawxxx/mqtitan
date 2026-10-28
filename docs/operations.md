@@ -88,18 +88,16 @@ Ingress is optional. Set ingress.enabled=true and configure ingress.className, i
 
 serviceMonitor.enabled requires Prometheus Operator CRDs. It scrapes /metrics using the same Secret bearer credential. Configure Prometheus's ServiceMonitor selector to include this release. The single-controller PDB blocks voluntary eviction while that controller is running; coordinate node maintenance, backups and upgrades, and expect downtime during the Recreate rollout.
 
-In the Helm chart, pass authentication settings to the controller with `controller.extraEnv`, which takes native Kubernetes env entries so secrets can come from `secretKeyRef`:
+In the Helm chart, configure OIDC sign-in with `auth.oidc` (see [authentication](authentication.md#helm)). Pass other authentication settings to the controller with `controller.extraEnv`, which takes native Kubernetes env entries so secrets can come from `secretKeyRef`:
 
 ```yaml
 controller:
   extraEnv:
-    - {name: MQTITAN_OIDC_ISSUER, value: "https://idp.example.com"}
-    - {name: MQTITAN_OIDC_CLIENT_ID, value: mqtitan}
     - name: MQTITAN_BASIC_PASSWORD
       valueFrom: {secretKeyRef: {name: mqtitan-basic, key: password}}
 ```
 
-The chart's NetworkPolicy is enabled by default and only allows DNS, controller traffic and `networkPolicy.brokerEgress`. OIDC discovery runs at controller startup, so without an egress rule to the identity provider (for example an `ipBlock` on port 443 added through `networkPolicy.brokerEgress`) the controller fails to start with `OIDC discovery failed`. The same applies to any other external endpoint the controller must reach, such as EMQX or Prometheus.
+The chart's NetworkPolicy is enabled by default and only allows DNS, controller traffic, `networkPolicy.brokerEgress` and, with OIDC enabled, `auth.oidc.egress`. OIDC discovery runs at controller startup, so without an egress rule to the identity provider (for example an `ipBlock` on port 443 in `auth.oidc.egress`) the controller fails to start with `OIDC discovery failed`. The same applies to any other external endpoint the controller must reach, such as EMQX or Prometheus.
 
 `controller.hostAliases` and `controller.dnsConfig` mirror the worker options for clusters where the controller needs custom name resolution.
 
@@ -115,7 +113,7 @@ Restart behavior must preserve stored results and mark unfinished runs interrupt
 
 ## Security
 
-MQTITAN_TOKEN authorizes the control plane; treat it as an administrative secret and do not place it in URLs. Set MQTITAN_WORKER_TOKEN on the controller and workers to give workers a separate credential: it is then the only token accepted on the worker registration and heartbeat routes and is rejected on every other route, so worker hosts no longer hold the administrative token. Worker assignments contain resolved broker credentials and TLS keys, which is why worker routes deserve their own secret. Each registration also receives a controller-issued session that heartbeats must present, so knowing a worker ID is not enough to receive its assignment. Local mode is for trusted single-user machines. Basic authentication uses MQTITAN_BASIC_USERNAME and MQTITAN_BASIC_PASSWORD. OIDC bearer-token verification uses MQTITAN_OIDC_ISSUER and MQTITAN_OIDC_CLIENT_ID. Trusted reverse-proxy identity uses MQTITAN_PROXY_IDENTITY_HEADER plus MQTITAN_TRUSTED_PROXY_CIDRS; never trust identity headers from arbitrary clients. This release does not provide per-user RBAC or native LDAP. Persistent test/scenario records are encrypted with AES-GCM; back up the database and its adjacent .key file together. Aggregated time-series samples are not encrypted. Broker passwords remain sensitive input: use runtime injection, avoid committing them, and verify redaction on exported results.
+MQTITAN_TOKEN authorizes the control plane; treat it as an administrative secret and do not place it in URLs. Set MQTITAN_WORKER_TOKEN on the controller and workers to give workers a separate credential: it is then the only token accepted on the worker registration and heartbeat routes and is rejected on every other route, so worker hosts no longer hold the administrative token. Worker assignments contain resolved broker credentials and TLS keys, which is why worker routes deserve their own secret. Each registration also receives a controller-issued session that heartbeats must present, so knowing a worker ID is not enough to receive its assignment. Local mode is for trusted single-user machines. Basic authentication uses MQTITAN_BASIC_USERNAME and MQTITAN_BASIC_PASSWORD. OIDC single sign-on (authentik, Keycloak, Entra ID, Okta and other providers) uses MQTITAN_OIDC_ISSUER and MQTITAN_OIDC_CLIENT_ID for bearer JWTs, plus MQTITAN_OIDC_REDIRECT_URL for browser sign-in with optional group restrictions; see [authentication](authentication.md). Trusted reverse-proxy identity uses MQTITAN_PROXY_IDENTITY_HEADER plus MQTITAN_TRUSTED_PROXY_CIDRS; never trust identity headers from arbitrary clients. Every authenticated user has full control; this release does not provide per-user RBAC or native LDAP. Persistent test/scenario records are encrypted with AES-GCM; back up the database and its adjacent .key file together. Aggregated time-series samples are not encrypted. Broker passwords remain sensitive input: use runtime injection, avoid committing them, and verify redaction on exported results.
 
 Without authentication configured, the controller only answers API and `/metrics` requests whose `Host` header is a loopback name or address (`localhost`, `127.0.0.1`, `[::1]`), so a web page using DNS rebinding cannot drive a local controller from the browser. `--allow-remote-local-mode` turns this check off along with the loopback-only listen requirement.
 

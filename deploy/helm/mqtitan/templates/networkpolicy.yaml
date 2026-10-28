@@ -21,4 +21,9 @@ spec:
     {{- with .Values.networkPolicy.brokerEgress }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
+    {{- if .Values.auth.oidc.enabled }}
+    {{- with .Values.auth.oidc.egress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- end }}
 {{- end }}
