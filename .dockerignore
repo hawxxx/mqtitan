@@ -8,3 +8,8 @@ web/dist
 coverage*
 
 **/*.key
+bin
+output
+.playwright-cli
+.github
+.env.*
