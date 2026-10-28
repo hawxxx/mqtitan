@@ -96,7 +96,7 @@ func openServer(o runOptions) (*localServer, error) {
 		return nil, err
 	}
 	assets, _ := web.FS()
-	apiOptions := api.Options{Token: token, WorkerToken: os.Getenv("MQTITAN_WORKER_TOKEN"), WebFS: assets, Authorize: authorize}
+	apiOptions := api.Options{Token: token, WorkerToken: os.Getenv("MQTITAN_WORKER_TOKEN"), WebFS: assets, Authorize: authorize, LoopbackOnly: !authConfig.Enabled() && !o.AllowRemote}
 	if o.Web != "" {
 		apiOptions.WebFS = nil
 		apiOptions.WebDir = o.Web

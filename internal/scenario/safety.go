@@ -193,7 +193,7 @@ func (s Scenario) idleWarnings() []string {
 	for _, w := range s.Workloads {
 		silent := w.Type == "connection" || w.Type == "subscriber"
 		if w.Type == "publisher" || w.Type == "mixed" {
-			silent = w.RatePerClient <= 0 || math.IsNaN(w.RatePerClient) || time.Duration(float64(time.Second)/w.RatePerClient) >= hint
+			silent = w.RatePerClient <= 0 || math.IsNaN(w.RatePerClient) || float64(time.Second)/w.RatePerClient >= float64(hint)
 		}
 		if silent {
 			out = append(out, fmt.Sprintf("workload %q sends nothing for at least %s: keepAlive %s >= broker.idleTimeoutHint %s, so the load balancer may drop idle connections; set keepAlive <= %s", w.Name, hint, keep, hint, hint/2))

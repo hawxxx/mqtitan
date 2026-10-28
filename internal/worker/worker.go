@@ -55,7 +55,7 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	base := strings.TrimRight(opts.Controller, "/")
-	post := func(path string, body, out any) error {
+	post := func(ctx context.Context, path string, body, out any) error {
 		// Reports carry three dense HDR histograms (~130 KB of JSON, mostly
 		// zeros); gzip reduces them to a few kilobytes per heartbeat.
 		var b bytes.Buffer
@@ -102,11 +102,34 @@ func Run(ctx context.Context, opts Options) error {
 	var current *running
 	lastAssignment := ""
 	defer func() {
-		if current != nil {
-			current.cancel()
-			if !current.finished {
-				<-current.done
+		if current == nil {
+			return
+		}
+		current.cancel()
+		if current.finished {
+			return
+		}
+		if err := <-current.done; err != nil && current.failure == "" {
+			current.failure = "load engine failed"
+			if errors.Is(err, context.Canceled) {
+				current.failure = "worker stopped before the assignment finished"
 			}
+		}
+		if !registered {
+			return
+		}
+		// Send the final counters so the controller fails the run now with
+		// this worker's load accounted for, instead of waiting for the lease
+		// to expire. ctx is already cancelled, so use a short detached one.
+		final, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		sequence++
+		h := api.Heartbeat{ID: opts.ID, ClientTime: time.Now().UTC(), Session: session}
+		h.Report = &api.Report{AssignmentID: current.assignment.ID, Snapshot: current.counters.Snapshot(), Distribution: current.counters.ExportDistribution(), Done: true, Error: current.failure, Sequence: sequence}
+		load, _ := current.control.Current()
+		h.Report.ControlRevision = load.Revision
+		if err := post(final, "/api/v1/workers/heartbeat", h, nil); err != nil {
+			slog.Warn("worker final report failed", "worker", opts.ID)
 		}
 	}()
 	ticker := time.NewTicker(time.Second)
@@ -119,7 +142,7 @@ func Run(ctx context.Context, opts Options) error {
 			var reg struct {
 				Session string `json:"session"`
 			}
-			err = post("/api/v1/workers/register", api.Worker{ID: opts.ID, CPUCount: runtime.NumCPU(), SupportsLiveControl: true, Session: session, Host: &host}, &reg)
+			err = post(ctx, "/api/v1/workers/register", api.Worker{ID: opts.ID, CPUCount: runtime.NumCPU(), SupportsLiveControl: true, Session: session, Host: &host}, &reg)
 			if err == nil {
 				registered = true
 				session = reg.Session
@@ -149,7 +172,7 @@ func Run(ctx context.Context, opts Options) error {
 			}
 			var response api.HeartbeatResponse
 			before := time.Now()
-			err = post("/api/v1/workers/heartbeat", h, &response)
+			err = post(ctx, "/api/v1/workers/heartbeat", h, &response)
 			after := time.Now()
 			if err == nil {
 				lastContact = after

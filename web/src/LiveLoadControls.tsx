@@ -91,7 +91,7 @@ export function LiveLoadControls({
     const abort = new AbortController();
     controller.current = abort;
     try {
-      const updated = await request<Test>(`/tests/${test.id}/load`, {
+      const updated = await request<Test>(`/tests/${encodeURIComponent(test.id)}/load`, {
         method: "POST",
         signal: abort.signal,
         body: JSON.stringify({

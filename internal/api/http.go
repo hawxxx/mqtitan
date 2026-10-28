@@ -13,7 +13,9 @@ import (
 	"github.com/mqtitan/mqtitan/internal/storage"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +34,11 @@ type Options struct {
 	WebDir      string
 	WebFS       fs.FS
 	Authorize   func(*http.Request) bool
+	// LoopbackOnly rejects API requests whose Host header is not a loopback
+	// name or address. An unauthenticated loopback controller relies on it:
+	// a DNS-rebinding page sends a matching Host and Origin of its own, so
+	// the same-origin check alone does not stop it.
+	LoopbackOnly bool
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
@@ -343,6 +350,10 @@ func Handler(m *Manager, opts Options) http.Handler {
 			return
 		}
 		if r.URL.Path != "/healthz" && r.URL.Path != "/readyz" && (strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/metrics") {
+			if opts.LoopbackOnly && !loopbackHost(r.Host) {
+				writeError(w, 403, "HOST_REJECTED", "unauthenticated controller only accepts loopback host names")
+				return
+			}
 			if opts.Authorize != nil || opts.Token != "" {
 				auth := r.Header.Get("Authorization")
 				authorized := false
@@ -378,6 +389,17 @@ func workerRoute(path string) bool {
 func bearer(r *http.Request, token string) bool {
 	given, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	return ok && token != "" && subtle.ConstantTimeCompare([]byte(given), []byte(token)) == 1
+}
+func loopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 func sameOrigin(origin, host string) bool {
 	return origin == "http://"+host || origin == "https://"+host

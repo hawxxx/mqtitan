@@ -89,3 +89,51 @@ func TestGzipBodiesAreDecodedAndBounded(t *testing.T) {
 		t.Fatalf("decompression bomb = %d, want 400", got)
 	}
 }
+
+func TestLoopbackOnlyRejectsRebindingHosts(t *testing.T) {
+	m, _ := setup(t)
+	h := Handler(m, Options{LoopbackOnly: true})
+	for host, want := range map[string]int{
+		"127.0.0.1:8080":    200,
+		"localhost:8080":    200,
+		"LOCALHOST":         200,
+		"[::1]:8080":        200,
+		"evil.example:8080": 403,
+		"10.0.0.5:8080":     403,
+	} {
+		r := httptest.NewRequest("GET", "/api/v1/tests", nil)
+		r.Host = host
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("Host %q = %d, want %d", host, w.Code, want)
+		}
+	}
+	r := httptest.NewRequest("GET", "/healthz", nil)
+	r.Host = "evil.example"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("health check with foreign Host = %d, want 200", w.Code)
+	}
+}
+
+func TestCrossOriginMutationRejected(t *testing.T) {
+	m, _ := setup(t)
+	h := Handler(m, Options{})
+	for origin, rejected := range map[string]bool{
+		"http://example.com":      false,
+		"https://example.com":     false,
+		"http://evil.example":     true,
+		"http://example.com.evil": true,
+	} {
+		r := httptest.NewRequest("POST", "/api/v1/plan", strings.NewReader(`{}`))
+		r.Host = "example.com"
+		r.Header.Set("Origin", origin)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if got := strings.Contains(w.Body.String(), "ORIGIN_REJECTED"); got != rejected {
+			t.Fatalf("Origin %q rejected = %v, want %v (%d %s)", origin, got, rejected, w.Code, w.Body.String())
+		}
+	}
+}

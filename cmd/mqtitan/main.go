@@ -43,12 +43,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: tracing configuration invalid")
 		os.Exit(1)
 	}
-	defer func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = shutdown(ctx)
-	}()
-	if err := run(os.Args[1:]); err != nil {
+	err := run(os.Args[1:])
+	// os.Exit skips deferred calls, so flush spans explicitly: failed runs are
+	// the ones whose traces matter most.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = shutdown(ctx)
+	cancel()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		var e exitError
 		if errors.As(err, &e) {

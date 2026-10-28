@@ -12,6 +12,7 @@ import (
 	transport "github.com/mqtitan/mqtitan/internal/mqtt"
 	"github.com/mqtitan/mqtitan/internal/payload"
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	"math"
 	mrand "math/rand/v2"
 	"net/netip"
 	"strings"
@@ -478,7 +479,13 @@ func (e *Engine) runSession(ctx context.Context, seq int, kind sessionKind, life
 }
 
 func ratePeriod(perSecond float64) time.Duration {
-	return max(time.Microsecond, time.Duration(float64(time.Second)/perSecond))
+	// Rates so small that the period exceeds int64 would wrap negative on
+	// conversion and then clamp to 1µs, so saturate them first.
+	p := float64(time.Second) / perSecond
+	if p >= math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return max(time.Microsecond, time.Duration(p))
 }
 
 // failureCategory separates operations that exceeded operationTimeout, and

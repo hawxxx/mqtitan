@@ -16,6 +16,7 @@ import (
 	"github.com/mqtitan/mqtitan/internal/scenario"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"strings"
 	"testing"
@@ -748,5 +749,19 @@ func TestPartitionsDrawDifferentLifetimes(t *testing.T) {
 	}
 	if a.dialSeed() != s.Seed {
 		t.Fatal("offset 0 changed the dialer seed")
+	}
+}
+
+func TestRatePeriodSaturatesTinyRates(t *testing.T) {
+	for _, rate := range []float64{1e-10, 1e-11, 1e-15} {
+		if got := ratePeriod(rate); got != time.Duration(math.MaxInt64) {
+			t.Fatalf("ratePeriod(%g) = %s, want max duration", rate, got)
+		}
+	}
+	if got := ratePeriod(1e9); got != time.Microsecond {
+		t.Fatalf("ratePeriod(1e9) = %s, want 1µs", got)
+	}
+	if got := ratePeriod(10); got != 100*time.Millisecond {
+		t.Fatalf("ratePeriod(10) = %s, want 100ms", got)
 	}
 }

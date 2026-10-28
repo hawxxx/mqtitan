@@ -563,7 +563,7 @@ export function Dashboard({
   const latest = running[0] || tests[0];
   const samples = useQuery({
     queryKey: ["metrics", latest?.id],
-    queryFn: () => request<Sample[]>(`/tests/${latest!.id}/metrics`),
+    queryFn: () => request<Sample[]>(`/tests/${encodeURIComponent(latest!.id)}/metrics`),
     enabled: !!latest,
     refetchInterval: latest?.status === "running" ? 3000 : false,
   });
@@ -1444,24 +1444,26 @@ function TestDetail({ id }: { id: string }) {
   const navigate = useNavigate();
   const test = useQuery({
     queryKey: ["test", id],
-    queryFn: () => request<Test>(`/tests/${id}`),
-    refetchInterval: 2000,
+    queryFn: () => request<Test>(`/tests/${encodeURIComponent(id)}`),
+    // Finished runs no longer change; keep polling only while running.
+    refetchInterval: (q) =>
+      !q.state.data || q.state.data.status === "running" ? 2000 : false,
   });
   const t = test.data;
   const metrics = useQuery({
     queryKey: ["metrics", id],
-    queryFn: () => request<Sample[]>(`/tests/${id}/metrics`),
+    queryFn: () => request<Sample[]>(`/tests/${encodeURIComponent(id)}/metrics`),
     refetchInterval: t?.status === "running" ? 5000 : false,
   });
   const stream = useStream(id, t?.status === "running");
   const brokers = useQuery({
     queryKey: ["brokers", id],
-    queryFn: () => request<FleetSample[]>(`/tests/${id}/brokers`),
+    queryFn: () => request<FleetSample[]>(`/tests/${encodeURIComponent(id)}/brokers`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
   const events = useQuery({
     queryKey: ["events", id],
-    queryFn: () => request<LogEvent[]>(`/tests/${id}/events`),
+    queryFn: () => request<LogEvent[]>(`/tests/${encodeURIComponent(id)}/events`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
   const zone = useTimeZone();
@@ -1469,7 +1471,7 @@ function TestDetail({ id }: { id: string }) {
   const [exportError, setExportError] = useState<unknown>();
   const qc = useQueryClient();
   const stop = useMutation({
-    mutationFn: () => request(`/tests/${id}/stop`, { method: "POST" }),
+    mutationFn: () => request(`/tests/${encodeURIComponent(id)}/stop`, { method: "POST" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["test", id] });
       qc.invalidateQueries({ queryKey: ["tests"] });
