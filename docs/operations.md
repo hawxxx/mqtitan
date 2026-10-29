@@ -59,7 +59,7 @@ networkPolicy:
           port: 8883
 ```
 
-worker.nodeSelector and worker.affinity also accept native Kubernetes configuration. Zone spreading requires nodes carrying zone labels. Place workers near brokers when measuring broker capacity, and deliberately vary zones when measuring network effects.
+worker.nodeSelector, worker.affinity and worker.tolerations also accept native Kubernetes configuration, and worker.podAnnotations adds pod annotations. Zone spreading requires nodes carrying zone labels. Place workers near brokers when measuring broker capacity, and deliberately vary zones when measuring network effects.
 
 ### Avoiding NAT connection limits
 
@@ -100,6 +100,16 @@ controller:
 The chart's NetworkPolicy is enabled by default and only allows DNS, controller traffic, `networkPolicy.brokerEgress` and, with OIDC enabled, `auth.oidc.egress`. OIDC discovery runs at controller startup, so without an egress rule to the identity provider (for example an `ipBlock` on port 443 in `auth.oidc.egress`) the controller fails to start with `OIDC discovery failed`. The same applies to any other external endpoint the controller must reach, such as EMQX or Prometheus.
 
 `controller.hostAliases` and `controller.dnsConfig` mirror the worker options for clusters where the controller needs custom name resolution.
+
+`controller.nodeSelector`, `controller.affinity`, `controller.tolerations` and `controller.podAnnotations` are empty by default and rendered only when set. They keep the controller, which holds the database and certificate profile, away from nodes that can be reclaimed. For example, with Karpenter:
+
+```yaml
+controller:
+  nodeSelector:
+    karpenter.sh/capacity-type: on-demand
+  podAnnotations:
+    karpenter.sh/do-not-disrupt: "true"
+```
 
 ## Tracing
 

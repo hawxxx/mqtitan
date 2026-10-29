@@ -10,6 +10,10 @@ spec:
   template:
     metadata:
       labels: {app: "{{ .Release.Name }}", component: worker}
+      {{- with .Values.worker.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       automountServiceAccountToken: false
       securityContext:
@@ -27,6 +31,10 @@ spec:
       {{- end }}
       {{- with .Values.worker.affinity }}
       affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.worker.topologySpreadConstraints }}

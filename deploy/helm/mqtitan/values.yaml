@@ -42,6 +42,13 @@ controller:
   extraEnv: []
   hostAliases: []
   dnsConfig: {}
+  # Scheduling, rendered only when set. Example: keep the controller off spot nodes with
+  # nodeSelector {karpenter.sh/capacity-type: on-demand}.
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  # Pod annotations, rendered only when set. Example: {karpenter.sh/do-not-disrupt: "true"}.
+  podAnnotations: {}
 persistence:
   enabled: true
   size: 10Gi
@@ -53,6 +60,9 @@ worker:
     limits: {cpu: "4", memory: 8Gi}
   nodeSelector: {}
   affinity: {}
+  tolerations: []
+  # Pod annotations, rendered only when set. Example: {karpenter.sh/do-not-disrupt: "true"}.
+  podAnnotations: {}
   topologySpreadConstraints: []
   hostAliases: []
   dnsConfig: {}
