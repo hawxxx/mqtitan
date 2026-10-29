@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/hawxxx/mqtitan/compare/v0.6.2...v0.7.0) (2026-10-29)
+
+
+### Features
+
+* **chart:** add controller scheduling values and podAnnotations ([#62](https://github.com/hawxxx/mqtitan/issues/62)) ([2de0b83](https://github.com/hawxxx/mqtitan/commit/2de0b830afccfcc91f4354186ba0963c5960fe26))
+
 ## [0.6.2](https://github.com/hawxxx/mqtitan/compare/v0.6.1...v0.6.2) (2026-10-29)
 
 
