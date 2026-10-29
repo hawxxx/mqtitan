@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/hawxxx/mqtitan/compare/v0.6.0...v0.6.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* bump go-jose to 4.1.6 for CVE-2026-116587 ([#54](https://github.com/hawxxx/mqtitan/issues/54)) ([083e8a6](https://github.com/hawxxx/mqtitan/commit/083e8a6424a14c92bc63df04b685ebfbeee201a7))
+
 ## [0.6.0](https://github.com/hawxxx/mqtitan/compare/v0.5.0...v0.6.0) (2026-10-29)
 
 
