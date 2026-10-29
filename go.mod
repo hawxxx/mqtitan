@@ -3,7 +3,7 @@ module github.com/mqtitan/mqtitan
 go 1.26.0
 
 require (
-	github.com/HdrHistogram/hdrhistogram-go v1.3.0
+	github.com/HdrHistogram/hdrhistogram-go v1.4.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/eclipse/paho.golang v0.23.0
 	github.com/eclipse/paho.mqtt.golang v1.5.1
