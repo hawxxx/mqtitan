@@ -306,7 +306,9 @@ func Handler(m *Manager, opts Options) http.Handler {
 	m.rerunRoutes(mux)
 	m.brokerRoute(mux)
 	if opts.AuthRoutes != nil {
-		mux.Handle("/auth/", opts.AuthRoutes)
+		// Method-qualified: a bare "/auth/" conflicts with the "GET /" dashboard route.
+		mux.Handle("GET /auth/", opts.AuthRoutes)
+		mux.Handle("POST /auth/", opts.AuthRoutes)
 	}
 	if opts.WebDir != "" || opts.WebFS != nil {
 		assets := opts.WebFS

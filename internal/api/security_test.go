@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func call(h http.Handler, method, path, token, body string) *httptest.ResponseRecorder {
@@ -147,5 +148,20 @@ func TestAuthRoutesBypassAPIAuthentication(t *testing.T) {
 	}
 	if got := call(h, "GET", "/api/v1/tests", "", "").Code; got != 401 {
 		t.Fatalf("API without credentials = %d, want 401", got)
+	}
+}
+
+func TestAuthRoutesCoexistWithDashboardAssets(t *testing.T) {
+	m, _ := setup(t)
+	auth := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]bool{"login": true}) })
+	assets := fstest.MapFS{"index.html": {Data: []byte("<html></html>")}}
+	h := Handler(m, Options{Token: "control", AuthRoutes: auth, WebFS: assets})
+	for _, tc := range []struct{ method, path string }{{"GET", "/auth/session"}, {"POST", "/auth/logout"}} {
+		if got := call(h, tc.method, tc.path, "", "").Code; got != 200 {
+			t.Fatalf("%s %s = %d, want 200", tc.method, tc.path, got)
+		}
+	}
+	if got := call(h, "GET", "/", "", "").Code; got != 200 {
+		t.Fatalf("GET / = %d, want 200", got)
 	}
 }
