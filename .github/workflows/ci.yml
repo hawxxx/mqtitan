@@ -71,3 +71,4 @@ jobs:
           cache-from: type=gha,scope=ci
           cache-to: type=gha,scope=ci,mode=max
       - run: docker run --rm mqtitan-ci:ci version
+      - run: scripts/smoke.sh mqtitan-ci:ci
