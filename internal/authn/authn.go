@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 	"net"
@@ -121,7 +122,7 @@ func (a *Authenticator) setupOIDC(ctx context.Context) error {
 	if c.OIDCCAFile != "" {
 		pem, err := os.ReadFile(c.OIDCCAFile)
 		if err != nil {
-			return errors.New("OIDC CA file unreadable")
+			return fmt.Errorf("OIDC CA file unreadable: %w", err)
 		}
 		pool, err := x509.SystemCertPool()
 		if err != nil {
@@ -136,7 +137,7 @@ func (a *Authenticator) setupOIDC(ctx context.Context) error {
 	ctx = oidc.ClientContext(ctx, a.client)
 	provider, err := oidc.NewProvider(ctx, c.OIDCIssuer)
 	if err != nil {
-		return errors.New("OIDC discovery failed")
+		return fmt.Errorf("OIDC discovery failed for %s: %w", c.OIDCIssuer, err)
 	}
 	// Audiences are checked against the configured list instead of only the
 	// client ID, so API access tokens can be accepted as well.

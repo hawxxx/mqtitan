@@ -69,6 +69,9 @@ func openServer(o runOptions) (*localServer, error) {
 	if err := checkListen(o.Listen, authMarker, o.AllowRemote); err != nil {
 		return nil, err
 	}
+	for _, w := range authWarnings(authConfig) {
+		fmt.Fprintln(os.Stderr, "warning:", w)
+	}
 	authCtx, authCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	authenticator, authErr := authn.New(authCtx, authConfig)
 	authCancel()
@@ -106,6 +109,15 @@ func openServer(o runOptions) (*localServer, error) {
 	l := &localServer{m, s, srv, make(chan error, 1), listener.Addr().String()}
 	go func() { l.errors <- srv.Serve(listener) }()
 	return l, nil
+}
+
+// authWarnings lists settings that start but behave worse than intended.
+func authWarnings(c authn.Config) []string {
+	var w []string
+	if c.OIDCRedirectURL != "" && c.OIDCCookieSecret == "" {
+		w = append(w, "MQTITAN_OIDC_COOKIE_SECRET is not set: a random session key is generated at start, so every restart signs all users out")
+	}
+	return w
 }
 
 // authConfigFromEnv reads the controller authentication settings.
