@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/hawxxx/mqtitan/compare/v0.5.0...v0.6.0) (2026-10-29)
+
+
+### Features
+
+* **chart:** add controller extraEnv, hostAliases and dnsConfig ([#51](https://github.com/hawxxx/mqtitan/issues/51)) ([a5187cb](https://github.com/hawxxx/mqtitan/commit/a5187cb9a5fd1edfbceef07f7be69ad30ce13675))
+
+
+### Bug Fixes
+
+* harden local controller and fix review findings ([#53](https://github.com/hawxxx/mqtitan/issues/53)) ([ee32b0e](https://github.com/hawxxx/mqtitan/commit/ee32b0ee4abb03669e934631b085e3500e543b01))
+
 ## [0.5.0](https://github.com/hawxxx/mqtitan/compare/v0.4.0...v0.5.0) (2026-10-27)
 
 
