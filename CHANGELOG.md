@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.2](https://github.com/hawxxx/mqtitan/compare/v0.6.1...v0.6.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* register auth routes per method so the controller starts ([#58](https://github.com/hawxxx/mqtitan/issues/58)) ([1f04672](https://github.com/hawxxx/mqtitan/commit/1f046722f46fd18ad4e4825523b2c8bc33133fe7))
+* report OIDC startup causes and warn on missing cookie secret ([#61](https://github.com/hawxxx/mqtitan/issues/61)) ([9ce70f4](https://github.com/hawxxx/mqtitan/commit/9ce70f400f9a339f27cdf3dc0a6536b69b2a1bf0))
+
 ## [0.6.1](https://github.com/hawxxx/mqtitan/compare/v0.6.0...v0.6.1) (2026-10-29)
 
 
