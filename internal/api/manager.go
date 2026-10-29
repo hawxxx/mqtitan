@@ -345,16 +345,19 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			}
 			m.logEvent(r, level, "%s", ended)
 			t := r.test
+			// Free the workers while still holding m.mu: once the status leaves
+			// "running", Start no longer reports ErrBusy and may assign them.
+			m.releaseAssignments(r)
 			m.notify(r, Event{"status", publicTest(t)})
 			m.mu.Unlock()
 			if err := m.persist(t); err != nil {
 				slog.Error("final persistence failed", "test", t.ID)
 			}
 			m.persistEvents(r)
-			m.releaseAssignments(r)
 			m.mu.Lock()
 			delete(m.runs, t.ID)
 			m.mu.Unlock()
+			r.cancel()
 			return
 		}
 	}

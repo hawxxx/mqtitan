@@ -7,15 +7,15 @@ Run commands from the repository root. You need Docker with Compose v2; Go and N
 Releases publish multi-arch (`linux/amd64`, `linux/arm64`) images to `ghcr.io/hawxxx/mqtitan` with SBOM, max-mode provenance, and a signed GitHub artifact attestation. Tags: `X.Y.Z`, `X.Y`, `X` (not for 0.x), `main`, `sha-<commit>`, and `latest` (stable `vX.Y.Z` tags only). Pin deployments by digest.
 
 ```sh
-docker pull ghcr.io/hawxxx/mqtitan:0.2.0
-gh attestation verify oci://ghcr.io/hawxxx/mqtitan:0.2.0 --repo hawxxx/mqtitan
+docker pull ghcr.io/hawxxx/mqtitan:<version>
+gh attestation verify oci://ghcr.io/hawxxx/mqtitan:<version> --repo hawxxx/mqtitan
 # Compose with the published image instead of a local build:
-MQTITAN_IMAGE=ghcr.io/hawxxx/mqtitan:0.2.0 docker compose up -d --no-build
+MQTITAN_IMAGE=ghcr.io/hawxxx/mqtitan:<version> docker compose up -d --no-build
 # Helm (digest wins over tag):
 helm install mqtitan deploy/helm/mqtitan --set image.digest=sha256:<digest>
 ```
 
-Releases are automated: conventional commits (`feat:`, `fix:`) on `main` open a "release PR" with the version bump and changelog. Merging it tags `vX.Y.Z` and publishes the image. Manual fallback: `git tag v0.2.0 && git push origin v0.2.0`. The release workflow scans the image first and publishes nothing if fixable HIGH/CRITICAL vulnerabilities are found. After the first push, set the GHCR package visibility to public if you want anonymous pulls.
+Releases are automated: conventional commits (`feat:`, `fix:`) on `main` open a "release PR" with the version bump and changelog. Merging it tags `vX.Y.Z` and publishes the image. The release workflow scans the image first and publishes nothing if fixable HIGH/CRITICAL vulnerabilities are found. After the first push, set the GHCR package visibility to public if you want anonymous pulls.
 
 ## Start the stack
 
@@ -29,7 +29,7 @@ docker compose ps
 docker compose logs --tail=50 controller
 ```
 
-Keep these variables available for later Compose commands and subsequent startups. Do not commit them. Open http://127.0.0.1:8080, go to **Settings**, and enter `MQTITAN_TOKEN`. The browser keeps it for the session. The EMQX development dashboard is at http://127.0.0.1:18083; its password is the separate EMQX secret.
+Keep these variables available for later Compose commands and subsequent startups. Do not commit them. Open http://127.0.0.1:8080, go to **Settings**, and enter `MQTITAN_TOKEN`. The browser keeps it for the session. To sign in through an identity provider instead, add the `MQTITAN_OIDC_*` variables from [authentication](authentication.md) to the controller's environment. The EMQX development dashboard is at http://127.0.0.1:18083; its password is the separate EMQX secret.
 
 ## Run a first test
 

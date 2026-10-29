@@ -50,6 +50,8 @@ import {
   Gauge,
   GitCompareArrows,
   LayoutDashboard,
+  LogIn,
+  LogOut,
   Play,
   Plus,
   Radio,
@@ -69,6 +71,7 @@ import {
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import {
+  authSession,
   bytes,
   download,
   elapsed,
@@ -78,6 +81,8 @@ import {
   makeScenario,
   number,
   request,
+  signInURL,
+  signOut,
   type Check,
   type FleetSample,
   type LogEvent,
@@ -104,6 +109,30 @@ function useTests() {
     queryFn: () => request<Test[]>("/tests"),
     refetchInterval: 3000,
   });
+}
+function useAuthSession() {
+  return useQuery({
+    queryKey: ["auth-session"],
+    queryFn: authSession,
+    staleTime: 60_000,
+  });
+}
+function SignInNotice() {
+  return (
+    <div className="notice sign-in" role="alert">
+      <ShieldCheck size={18} />
+      <div>
+        <strong>Sign-in required</strong>
+        <p>
+          This controller uses single sign-on. Sign in with your identity
+          provider, or enter an API token in Settings.
+        </p>
+      </div>
+      <a className="button primary" href={signInURL()}>
+        <LogIn size={14} /> Sign in with SSO
+      </a>
+    </div>
+  );
 }
 function Empty({
   title,
@@ -563,7 +592,7 @@ export function Dashboard({
   const latest = running[0] || tests[0];
   const samples = useQuery({
     queryKey: ["metrics", latest?.id],
-    queryFn: () => request<Sample[]>(`/tests/${latest!.id}/metrics`),
+    queryFn: () => request<Sample[]>(`/tests/${encodeURIComponent(latest!.id)}/metrics`),
     enabled: !!latest,
     refetchInterval: latest?.status === "running" ? 3000 : false,
   });
@@ -1444,24 +1473,26 @@ function TestDetail({ id }: { id: string }) {
   const navigate = useNavigate();
   const test = useQuery({
     queryKey: ["test", id],
-    queryFn: () => request<Test>(`/tests/${id}`),
-    refetchInterval: 2000,
+    queryFn: () => request<Test>(`/tests/${encodeURIComponent(id)}`),
+    // Finished runs no longer change; keep polling only while running.
+    refetchInterval: (q) =>
+      !q.state.data || q.state.data.status === "running" ? 2000 : false,
   });
   const t = test.data;
   const metrics = useQuery({
     queryKey: ["metrics", id],
-    queryFn: () => request<Sample[]>(`/tests/${id}/metrics`),
+    queryFn: () => request<Sample[]>(`/tests/${encodeURIComponent(id)}/metrics`),
     refetchInterval: t?.status === "running" ? 5000 : false,
   });
   const stream = useStream(id, t?.status === "running");
   const brokers = useQuery({
     queryKey: ["brokers", id],
-    queryFn: () => request<FleetSample[]>(`/tests/${id}/brokers`),
+    queryFn: () => request<FleetSample[]>(`/tests/${encodeURIComponent(id)}/brokers`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
   const events = useQuery({
     queryKey: ["events", id],
-    queryFn: () => request<LogEvent[]>(`/tests/${id}/events`),
+    queryFn: () => request<LogEvent[]>(`/tests/${encodeURIComponent(id)}/events`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
   const zone = useTimeZone();
@@ -1469,7 +1500,7 @@ function TestDetail({ id }: { id: string }) {
   const [exportError, setExportError] = useState<unknown>();
   const qc = useQueryClient();
   const stop = useMutation({
-    mutationFn: () => request(`/tests/${id}/stop`, { method: "POST" }),
+    mutationFn: () => request(`/tests/${encodeURIComponent(id)}/stop`, { method: "POST" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["test", id] });
       qc.invalidateQueries({ queryKey: ["tests"] });
@@ -2519,6 +2550,8 @@ function SettingsPage() {
   );
   const [message, setMessage] = useState("");
   const qc = useQueryClient();
+  const session = useAuthSession();
+  const user = session.data?.user;
   return (
     <>
       <Title
@@ -2527,6 +2560,33 @@ function SettingsPage() {
         detail="Browser preferences and API access for your workspace."
       />
       <section className="panel side-panel settings-panel">
+        {session.data?.login && (
+          <>
+            <h2>Single sign-on</h2>
+            {user?.method === "oidc" ? (
+              <>
+                <p>
+                  Signed in as <strong>{user.name || user.subject}</strong>
+                  {user.email && ` (${user.email})`}.
+                </p>
+                <button onClick={() => void signOut()}>
+                  <LogOut size={14} /> Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <p>
+                  Sign in with the identity provider configured for this
+                  controller.
+                </p>
+                <a className="button primary" href={signInURL("/settings")}>
+                  <LogIn size={14} /> Sign in with SSO
+                </a>
+              </>
+            )}
+            <div className="settings-rule" />
+          </>
+        )}
         <h2>API authentication</h2>
         <p>
           If the server uses MQTITAN_TOKEN, enter its token here. It is kept for
@@ -2583,7 +2643,13 @@ function Shell() {
     () => localStorage.getItem("mqtitan.theme") || "dark",
   );
   const tests = useTests();
+  const session = useAuthSession();
   const path = useRouterState({ select: (state) => state.location.pathname });
+  const user = session.data?.user;
+  const needsSignIn =
+    session.data?.login &&
+    !session.data.authenticated &&
+    !sessionStorage.getItem("mqtitan.token");
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("mqtitan.theme", theme);
@@ -2674,12 +2740,28 @@ function Shell() {
           </div>
           <div className="topbar-actions">
             <TimeZonePicker />
+            {user?.method === "oidc" && (
+              <span
+                className="session-user"
+                title={user.email || user.subject}
+              >
+                {user.name || user.email || user.subject}
+                <button
+                  aria-label="Sign out"
+                  title="Sign out"
+                  onClick={() => void signOut()}
+                >
+                  <LogOut size={14} />
+                </button>
+              </span>
+            )}
             <span className="environment">
               <i /> LOCAL
             </span>
           </div>
         </header>
         <main id="main-content" tabIndex={-1} key={path} className="page-enter">
+          {needsSignIn && path !== "/settings" && <SignInNotice />}
           <PageContent
             tests={tests.data || []}
             error={tests.error}

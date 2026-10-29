@@ -9,6 +9,31 @@ auth:
   # Optional key in the same Secret holding a separate worker token. When set,
   # workers receive only this token and it is only accepted on worker routes.
   workerKey: ""
+  # OpenID Connect sign-in (authentik, Keycloak, Entra ID, Okta, Dex, ...).
+  # See docs/authentication.md. The bearer token above keeps working for CLI
+  # and automation alongside OIDC.
+  oidc:
+    enabled: false
+    issuer: ""             # e.g. https://authentik.example.com/application/o/mqtitan/
+    clientId: ""
+    # Public callback URL; defaults to https://<ingress.host>/auth/callback.
+    redirectUrl: ""
+    postLogoutRedirectUrl: ""
+    scopes: []             # default: openid, profile, email
+    audiences: []          # extra accepted bearer-token audiences
+    allowedGroups: []      # empty: any user the IdP lets through
+    groupsClaim: ""        # default: groups
+    usernameClaim: ""      # default: preferred_username
+    sessionTTL: ""         # default: 8h
+    # Secret with the client secret and a cookie secret (>= 32 characters)
+    # so sessions survive controller restarts. Missing keys are skipped.
+    existingSecret: ""
+    clientSecretKey: client-secret
+    cookieSecretKey: cookie-secret
+    # ConfigMap holding ca.crt for an identity provider behind a private CA.
+    caConfigMap: ""
+    # NetworkPolicy egress rules that let the controller reach the IdP.
+    egress: []
 controller:
   resources:
     requests: {cpu: 250m, memory: 256Mi}

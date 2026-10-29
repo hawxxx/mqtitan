@@ -17,7 +17,7 @@ func TestTokenRequiresBearerScheme(t *testing.T) {
 	}{{"Bearer secret", true}, {"secret", false}, {"Bearer wrong", false}, {"", false}} {
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("Authorization", tc.header)
-		if a(r) != tc.want {
+		if a.Authorize(r) != tc.want {
 			t.Fatalf("header %q accepted incorrectly", tc.header)
 		}
 	}
@@ -29,11 +29,11 @@ func TestBasicAuthAndTrustedProxy(t *testing.T) {
 	}
 	r := httptest.NewRequest("GET", "/", nil)
 	r.SetBasicAuth("sre", "private")
-	if !a(r) {
+	if !a.Authorize(r) {
 		t.Fatal("valid basic rejected")
 	}
 	r.SetBasicAuth("sre", "wrong")
-	if a(r) {
+	if a.Authorize(r) {
 		t.Fatal("wrong basic accepted")
 	}
 	a, err = New(context.Background(), Config{ProxyHeader: "X-Forwarded-User", TrustedProxyCIDRs: []string{"127.0.0.1/32"}})
@@ -42,11 +42,11 @@ func TestBasicAuthAndTrustedProxy(t *testing.T) {
 	}
 	r.Header.Set("X-Forwarded-User", "alice")
 	r.RemoteAddr = "203.0.113.1:8000"
-	if a(r) {
+	if a.Authorize(r) {
 		t.Fatal("untrusted client spoofed identity")
 	}
 	r.RemoteAddr = "127.0.0.1:9000"
-	if !a(r) {
+	if !a.Authorize(r) {
 		t.Fatal("trusted proxy rejected")
 	}
 }

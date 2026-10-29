@@ -26,14 +26,13 @@ Volumes persist controller and broker state. Stop with docker compose down; do n
 
 ## Helm
 
-Build and push an image under a versioned tag. Create a Kubernetes Secret named mqtitan-auth containing the token key through your secret-management workflow. Do not put real credentials in committed values files.
+The chart defaults to the published `ghcr.io/hawxxx/mqtitan` image; pin it with `image.digest` (or `image.tag`). Create a Kubernetes Secret named mqtitan-auth containing the token key through your secret-management workflow. Do not put real credentials in committed values files.
 
 ```sh
 helm lint deploy/helm/mqtitan
-helm template mqtitan deploy/helm/mqtitan --set image.repository=registry.example.com/mqtitan
+helm template mqtitan deploy/helm/mqtitan
 helm upgrade --install mqtitan deploy/helm/mqtitan \
-  --set image.repository=registry.example.com/mqtitan \
-  --set image.tag=0.1.0 --set auth.existingSecret=mqtitan-auth
+  --set image.digest=sha256:<digest> --set auth.existingSecret=mqtitan-auth
 kubectl port-forward service/mqtitan 8080:8080
 ```
 
@@ -85,24 +84,26 @@ worker:
 
 Workers report the range they see, and the controller's plan warning uses the smallest reported value in place of its conservative 25,000 default. List one entry per address to spread connections. Pin load balancer IPs with explicit subnet mappings or they can change. A private DNS zone is more robust where you control DNS; `worker.dnsConfig` accepts native pod DNS configuration.
 
-Ingress is optional. Configure ingress.className, ingress.host and ingress.tlsSecret to terminate HTTPS; bearer tokens must travel over encrypted connections. The controller has /healthz and /readyz probes on port 8080. Workers expose the same paths on port 8081 via --health-listen; readiness reflects controller communication. Controller heartbeats and leases separately detect unavailable execution capacity.
+Ingress is optional. Set ingress.enabled=true and configure ingress.className, ingress.host and ingress.tlsSecret to terminate HTTPS; bearer tokens must travel over encrypted connections. The controller has /healthz and /readyz probes on port 8080. Workers expose the same paths on port 8081 via --health-listen; readiness reflects controller communication. Controller heartbeats and leases separately detect unavailable execution capacity.
 
 serviceMonitor.enabled requires Prometheus Operator CRDs. It scrapes /metrics using the same Secret bearer credential. Configure Prometheus's ServiceMonitor selector to include this release. The single-controller PDB blocks voluntary eviction while that controller is running; coordinate node maintenance, backups and upgrades, and expect downtime during the Recreate rollout.
 
-In the Helm chart, pass authentication settings to the controller with `controller.extraEnv`, which takes native Kubernetes env entries so secrets can come from `secretKeyRef`:
+In the Helm chart, configure OIDC sign-in with `auth.oidc` (see [authentication](authentication.md#helm)). Pass other authentication settings to the controller with `controller.extraEnv`, which takes native Kubernetes env entries so secrets can come from `secretKeyRef`:
 
 ```yaml
 controller:
   extraEnv:
-    - {name: MQTITAN_OIDC_ISSUER, value: "https://idp.example.com"}
-    - {name: MQTITAN_OIDC_CLIENT_ID, value: mqtitan}
     - name: MQTITAN_BASIC_PASSWORD
       valueFrom: {secretKeyRef: {name: mqtitan-basic, key: password}}
 ```
 
-The chart's NetworkPolicy is enabled by default and only allows DNS, controller traffic and `networkPolicy.brokerEgress`. OIDC discovery runs at controller startup, so without an egress rule to the identity provider (for example an `ipBlock` on port 443 added through `networkPolicy.brokerEgress`) the controller fails to start with `OIDC discovery failed`. The same applies to any other external endpoint the controller must reach, such as EMQX or Prometheus.
+The chart's NetworkPolicy is enabled by default and only allows DNS, controller traffic, `networkPolicy.brokerEgress` and, with OIDC enabled, `auth.oidc.egress`. OIDC discovery runs at controller startup, so without an egress rule to the identity provider (for example an `ipBlock` on port 443 in `auth.oidc.egress`) the controller fails to start with `OIDC discovery failed`. The same applies to any other external endpoint the controller must reach, such as EMQX or Prometheus.
 
 `controller.hostAliases` and `controller.dnsConfig` mirror the worker options for clusters where the controller needs custom name resolution.
+
+## Tracing
+
+OpenTelemetry tracing is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set; spans are exported over OTLP/HTTP and the standard `OTEL_EXPORTER_OTLP_*` variables configure the exporter. `MQTITAN_TRACE_SAMPLE_RATIO` (0 to 1, default 0.01) sets the parent-based sampling ratio. An invalid ratio makes every command exit with `tracing configuration invalid`.
 
 ## Persistence and recovery
 
@@ -112,7 +113,11 @@ Restart behavior must preserve stored results and mark unfinished runs interrupt
 
 ## Security
 
-MQTITAN_TOKEN authorizes the control plane; treat it as an administrative secret and do not place it in URLs. Set MQTITAN_WORKER_TOKEN on the controller and workers to give workers a separate credential: it is then the only token accepted on the worker registration and heartbeat routes and is rejected on every other route, so worker hosts no longer hold the administrative token. Worker assignments contain resolved broker credentials and TLS keys, which is why worker routes deserve their own secret. Each registration also receives a controller-issued session that heartbeats must present, so knowing a worker ID is not enough to receive its assignment. Local mode is for trusted single-user machines. Basic authentication uses MQTITAN_BASIC_USERNAME and MQTITAN_BASIC_PASSWORD. OIDC bearer-token verification uses MQTITAN_OIDC_ISSUER and MQTITAN_OIDC_CLIENT_ID. Trusted reverse-proxy identity uses MQTITAN_PROXY_IDENTITY_HEADER plus MQTITAN_TRUSTED_PROXY_CIDRS; never trust identity headers from arbitrary clients. This release does not provide per-user RBAC or native LDAP. Persistent test/scenario records are encrypted with AES-GCM; back up the database and its adjacent .key file together. Aggregated time-series samples are not encrypted. Broker passwords remain sensitive input: use runtime injection, avoid committing them, and verify redaction on exported results.
+MQTITAN_TOKEN authorizes the control plane; treat it as an administrative secret and do not place it in URLs. Set MQTITAN_WORKER_TOKEN on the controller and workers to give workers a separate credential: it is then the only token accepted on the worker registration and heartbeat routes and is rejected on every other route, so worker hosts no longer hold the administrative token. Worker assignments contain resolved broker credentials and TLS keys, which is why worker routes deserve their own secret. Each registration also receives a controller-issued session that heartbeats must present, so knowing a worker ID is not enough to receive its assignment. Local mode is for trusted single-user machines. Basic authentication uses MQTITAN_BASIC_USERNAME and MQTITAN_BASIC_PASSWORD. OIDC single sign-on (authentik, Keycloak, Entra ID, Okta and other providers) uses MQTITAN_OIDC_ISSUER and MQTITAN_OIDC_CLIENT_ID for bearer JWTs, plus MQTITAN_OIDC_REDIRECT_URL for browser sign-in with optional group restrictions; see [authentication](authentication.md). Trusted reverse-proxy identity uses MQTITAN_PROXY_IDENTITY_HEADER plus MQTITAN_TRUSTED_PROXY_CIDRS; never trust identity headers from arbitrary clients. Every authenticated user has full control; this release does not provide per-user RBAC or native LDAP. Persistent test/scenario records are encrypted with AES-GCM; back up the database and its adjacent .key file together. Aggregated time-series samples are not encrypted. Broker passwords remain sensitive input: use runtime injection, avoid committing them, and verify redaction on exported results.
+
+Without authentication configured, the controller only answers API and `/metrics` requests whose `Host` header is a loopback name or address (`localhost`, `127.0.0.1`, `[::1]`), so a web page using DNS rebinding cannot drive a local controller from the browser. `--allow-remote-local-mode` turns this check off along with the loopback-only listen requirement.
+
+Workers send their bearer token and receive resolved broker credentials and TLS keys on every heartbeat, so use an `https://` controller URL (or a mesh with mTLS) whenever worker and controller traffic leaves a trusted network.
 
 TLS connections use certificate verification. Install private CA certificates into the container trust store when necessary; avoid disabling verification. Broker listener TLS and control-plane HTTPS are separate settings. API access permits load generation against broker destinations, so restrict network egress and control-plane access.
 

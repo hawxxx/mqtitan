@@ -10,6 +10,7 @@ MQTiTan is an engineering preview. Deployment manifests and large scenarios are 
 | Change a running test | [Live controls](live-controls.md) |
 | Repeat a finished test | [Rerunning tests](reruns.md) |
 | Configure TLS or upload certificates | [Certificates](certificates.md) |
+| Sign in with authentik, Keycloak or another OIDC provider | [Authentication](authentication.md) |
 | Deploy controllers and workers | [Operations](operations.md) |
 | Start a container stack | [Docker and Compose](docker.md) |
 | Run distributed load in a cluster | [Kubernetes with Helm](kubernetes.md) |

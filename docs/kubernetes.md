@@ -77,6 +77,6 @@ kubectl -n mqtitan logs -l app=mqtitan,component=worker --tail=100
 
 Use `helm upgrade ... -f values.local.yaml` after changing worker replicas or resources. Stop active tests before upgrades or scale-down: worker loss stops a run and does not trigger automatic reassignment. The controller uses a Recreate rollout; expect downtime. A disruption budget can block voluntary node eviction.
 
-For remote UI access, configure ingress class, hostname, and an existing TLS Secret rather than exposing an unauthenticated HTTP service. ServiceMonitor requires Prometheus Operator CRDs and matching discovery selectors. See [operations](operations.md#helm) for these options.
+For remote UI access, set `ingress.enabled=true` and configure ingress class, hostname, and an existing TLS Secret rather than exposing an unauthenticated HTTP service. ServiceMonitor requires Prometheus Operator CRDs and matching discovery selectors. See [operations](operations.md#helm) for these options.
 
 Back up the database and adjacent `.key` together. Pod replacement with the same volume preserves results and certificates; it does not resume sockets. Before uninstalling, inspect chart-owned PVCs and the storage class/PV reclaim policy: `helm uninstall mqtitan -n mqtitan` can remove chart-owned storage resources. Do not assume uninstall preserves data. Avoid deleting the namespace until retention and backup requirements are resolved.

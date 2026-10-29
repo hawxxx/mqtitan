@@ -1,8 +1,9 @@
 .PHONY: build web test check
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 web:
 	cd web && npm ci && npm run build
 build: web
-	go build -o bin/mqtitan ./cmd/mqtitan
+	go build -ldflags "-X main.version=$(VERSION)" -o bin/mqtitan ./cmd/mqtitan
 test:
 	go test ./...
 	cd web && npm test -- --run

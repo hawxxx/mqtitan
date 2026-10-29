@@ -42,7 +42,7 @@ SQLite is the implemented database; PostgreSQL is not supported. The `records` t
 
 Compaction retains the latest cumulative sample per bucket: 5 seconds after one hour, 30 seconds after one day, and one minute after seven days. Samples older than 90 days are removed when compaction runs. This is not averaging or peak-preserving aggregation, nor a standalone retention daemon. Metadata is not automatically deleted with samples.
 
-Authentication supports local mode, bearer tokens, basic authentication, OIDC, and trusted reverse-proxy authentication. Native LDAP and role-based authorization are not implemented. Remote HTTP endpoints require TLS at the ingress/reverse proxy. Persistent certificate profiles survive pod/container replacement when their database volume survives; see [certificates](../certificates.md).
+Authentication supports local mode, bearer tokens, basic authentication, OIDC (authorization code with PKCE and encrypted session cookies, plus bearer JWT verification), and trusted reverse-proxy authentication; see [authentication](../authentication.md). Native LDAP and role-based authorization are not implemented. Remote HTTP endpoints require TLS at the ingress/reverse proxy. Persistent certificate profiles survive pod/container replacement when their database volume survives; see [certificates](../certificates.md).
 
 Prometheus aggregates are exposed at `/metrics`. OpenTelemetry samples internal operations rather than tracing each message. A pprof endpoint is not currently implemented.
 

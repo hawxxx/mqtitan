@@ -5,6 +5,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/healthz`, `/readyz` | Process probes, not broker capacity certification |
+| GET / POST | `/auth/session`, `/auth/login`, `/auth/callback`, `/auth/logout` | OIDC browser sign-in and session status, outside `/api/v1`; see [authentication](authentication.md#endpoints) |
 | GET | `/metrics` | Prometheus aggregates, including `emqxload_connect_failures_total{stage}` and `emqxload_connack_refusals_total{code}`, `emqxload_churned_total` and `emqxload_churn_reconnects_total`, and for the latest test with telemetry `emqxload_broker_connections{target,zone}`, `emqxload_broker_connection_cv`, `emqxload_zone_connection_skew_ratio` and `emqxload_broker_telemetry_complete`. Tests carry `balance` (peak sample statistics; ratios are `null` when infinite) |
 | POST / GET | `/api/v1/tests` | Start / list tests |
 | GET | `/api/v1/tests/{id}` | Status and metadata |
@@ -12,7 +13,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | POST | `/api/v1/tests/{id}/rerun` | Fresh run using original server-side scenario |
 | POST | `/api/v1/tests/{id}/load` | Apply [live controls](live-controls.md) |
 | GET | `/api/v1/tests/{id}/metrics` | Aggregate history |
-| GET | `/api/v1/tests/{id}/stream` | Live SSE: `status`, `metrics`, `broker` and `log` events |
+| GET | `/api/v1/tests/{id}/stream` | Live SSE: `status`, `metrics`, `broker`, `log` and `heartbeat` events |
 | GET | `/api/v1/tests/{id}/events` | Run log: `seq`, `time`, `level` (`info`, `action`, `warn`, `error`) and `message` per entry; at most 1000 per test |
 | GET | `/api/v1/tests/{id}/brokers` | Per-test broker telemetry samples (see [EMQX integration](emqx.md#per-test-telemetry)) |
 | GET | `/api/v1/tests/{id}/export?format=json` | JSON report; `format=csv` also supported (columns: timestamp, connected, published, messages_per_second, bytes_per_second, p50_ms, p95_ms, p99_ms, connection_errors, publish_errors, received, end_to_end_p95_ms, subscribe_errors, connect_failures) |
@@ -46,7 +47,7 @@ curl --fail-with-body -sS \
 curl -N http://127.0.0.1:8080/api/v1/tests/TEST_ID/stream
 ```
 
-SSE types are `status`, `metrics`, `broker` and `heartbeat`. A `broker` event carries one telemetry sample (`timestamp`, `source`, `targets[]` with `target`, `zone`, `connections`, `raw`, optional `nodes` (EMQX node names) and optional `error`, `complete`, `baseline`, optional `error`) and is sent only for scenarios with a `telemetry` block. Slow consumers can skip snapshots; there is no `Last-Event-ID` replay. Fetch state/history after reconnecting. Lists return at most 1,000 records and metrics retrieval at most 3,600 samples. JSON export contains `data.test` and `data.samples`. Go duration fields serialize as nanoseconds unless a dedicated display field is used.
+SSE types are `status`, `metrics`, `broker`, `log` and `heartbeat`. A `broker` event carries one telemetry sample (`timestamp`, `source`, `targets[]` with `target`, `zone`, `connections`, `raw`, optional `nodes` (EMQX node names) and optional per-target `error`; then sample-level `complete`, `baseline` and optional `error`) and is sent only for scenarios with a `telemetry` block. Slow consumers can skip snapshots; there is no `Last-Event-ID` replay. Fetch state/history after reconnecting. Lists return at most 1,000 records and metrics retrieval at most 3,600 samples. JSON export contains `data.test` and `data.samples`. Go duration fields serialize as nanoseconds unless a dedicated display field is used.
 
 ## Connect failure breakdown
 
@@ -60,6 +61,6 @@ In CSV exports the `connect_failures` column is formatted `stage=n;stage=n`. See
 
 ## Security
 
-Configured authentication protects `/api/*` and `/metrics`; probes remain accessible. Bearer clients send `Authorization: Bearer TOKEN`. Do not commit tokens. Remote deployments need TLS at the reverse proxy; the HTTP listener does not itself provide HTTPS. Browser mutations with an `Origin` header must match the request origin; native clients can omit that header.
+Configured authentication protects `/api/*` and `/metrics`; probes remain accessible. Bearer clients send `Authorization: Bearer TOKEN`, where the token is `MQTITAN_TOKEN` or a JWT from the configured OIDC issuer. Browsers signed in through OIDC send a session cookie instead; cookie-authenticated mutations must come from the controller's own origin. Do not commit tokens. Remote deployments need TLS at the reverse proxy; the HTTP listener does not itself provide HTTPS. Browser mutations with an `Origin` header must match the request origin; native clients can omit that header.
 
 Certificate upload accepts `name`, optional `caPem`, and paired `certPem`/`keyPem`. Listing returns metadata, not private keys. Read [certificate security](certificates.md) first. General scenario/profile deletion and role-based access controls are not implemented.
