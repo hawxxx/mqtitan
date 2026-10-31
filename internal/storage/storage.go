@@ -117,6 +117,16 @@ func (s *Store) Get(kind, id string) ([]byte, error) {
 	}
 	return s.open(v)
 }
+func (s *Store) Delete(kind, id string) error {
+	r, err := s.db.Exec(`DELETE FROM records WHERE kind=? AND id=?`, kind, id)
+	if err != nil {
+		return err
+	}
+	if n, err := r.RowsAffected(); err == nil && n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 func (s *Store) List(kind string, limit int) ([][]byte, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 1000

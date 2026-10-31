@@ -1038,13 +1038,24 @@ textarea:focus {
 .side-panel label {
   margin-top: 20px;
 }
+.scenario-row {
+  display: flex;
+  align-items: stretch;
+  border-top: 1px solid var(--line);
+}
+.scenario-delete {
+  background: none;
+  border: 0;
+  color: var(--muted);
+  padding: 0 8px;
+}
 .scenario-item {
   display: flex;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   justify-content: flex-start;
   background: none;
   border: 0;
-  border-top: 1px solid var(--line);
   border-radius: 0;
   padding: 16px 0;
   color: var(--muted);
