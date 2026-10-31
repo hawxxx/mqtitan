@@ -512,6 +512,9 @@ func (m *Manager) Scenarios() ([]SavedScenario, error) {
 	}
 	return out, nil
 }
+func (m *Manager) DeleteScenario(id string) error {
+	return m.store.Delete("scenarios", id)
+}
 func publicTest(t Test) Test { t.Scenario = redact(t.Scenario); return t }
 func redact(raw string) string {
 	var node yaml.Node

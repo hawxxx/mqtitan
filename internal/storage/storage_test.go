@@ -81,3 +81,23 @@ func TestBoundedMetricHistory(t *testing.T) {
 		t.Fatalf("bounded samples: %v %v", samples, err)
 	}
 }
+
+func TestDeleteRecord(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "runs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err = s.Put("scenarios", "a", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Delete("scenarios", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Get("scenarios", "a"); err != ErrNotFound {
+		t.Fatalf("get after delete: %v", err)
+	}
+	if err = s.Delete("scenarios", "a"); err != ErrNotFound {
+		t.Fatalf("second delete: %v", err)
+	}
+}

@@ -18,6 +18,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | GET | `/api/v1/tests/{id}/brokers` | Per-test broker telemetry samples (see [EMQX integration](emqx.md#per-test-telemetry)) |
 | GET | `/api/v1/tests/{id}/export?format=json` | JSON report; `format=csv` also supported (columns: timestamp, connected, published, messages_per_second, bytes_per_second, p50_ms, p95_ms, p99_ms, connection_errors, publish_errors, received, end_to_end_p95_ms, subscribe_errors, connect_failures) |
 | POST / GET | `/api/v1/scenarios` | Save / list scenarios |
+| DELETE | `/api/v1/scenarios/{id}` | Delete a saved scenario (`204`, or `404` if unknown) |
 | POST | `/api/v1/plan` | Validate and estimate a scenario |
 | GET | `/api/v1/doctor` | Controller-host diagnostics |
 | GET | `/api/v1/workers` | Registered workers, with self-reported `host` details (OS, CPU, memory and limits) from current workers |

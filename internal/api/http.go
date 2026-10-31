@@ -231,6 +231,13 @@ func Handler(m *Manager, opts Options) http.Handler {
 		}
 		writeJSON(w, 201, v)
 	})
+	mux.HandleFunc("DELETE /api/v1/scenarios/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if err := m.DeleteScenario(r.PathValue("id")); err != nil {
+			resultError(w, err)
+			return
+		}
+		w.WriteHeader(204)
+	})
 	mux.HandleFunc("POST /api/v1/plan", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Scenario string `json:"scenario"`
