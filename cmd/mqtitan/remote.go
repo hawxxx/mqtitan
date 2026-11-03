@@ -63,6 +63,9 @@ func request(ctx context.Context, controller, method, path string, body any, out
 		_, err = io.Copy(writer, io.LimitReader(resp.Body, 64<<20))
 		return err
 	}
+	if resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
 	var envelope struct {
 		Data json.RawMessage `json:"data"`
 	}
@@ -96,6 +99,14 @@ func remoteCommand(command string, args []string) error {
 	switch command {
 	case "workers":
 		path = "/api/v1/workers"
+	case "scenarios":
+		path = "/api/v1/scenarios"
+	case "delete-scenario":
+		if id == "" {
+			return errors.New("scenario ID required")
+		}
+		path = "/api/v1/scenarios/" + url.PathEscape(id)
+		method = "DELETE"
 	case "status":
 		if id != "" {
 			path += "/" + url.PathEscape(id)

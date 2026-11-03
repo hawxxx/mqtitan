@@ -61,6 +61,7 @@ import {
   Settings,
   ShieldCheck,
   Square,
+  Trash2,
   Sun,
   Terminal,
   TriangleAlert,
@@ -1090,6 +1091,16 @@ export function ScenarioEditor({
       setMessage("Scenario saved.");
     },
   });
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      request<void>(`/scenarios/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["scenarios"] });
+      setMessage("Scenario deleted.");
+    },
+  });
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const importFiles = useMutation({
@@ -1281,23 +1292,35 @@ export function ScenarioEditor({
               <ErrorNotice error={saved.error} />
             ) : saved.data?.length ? (
               saved.data.map((s) => (
-                <button
-                  className="scenario-item"
-                  key={s.id}
-                  onClick={() => {
-                    setYaml(s.yaml);
-                    setName(s.name);
-                  }}
-                >
-                  <FileCode2 size={17} />
-                  <span>
-                    {s.name}
-                    <small>
-                      <Stamp at={s.createdAt} format={day} />
-                    </small>
-                  </span>
-                  <ChevronRight size={14} />
-                </button>
+                <div className="scenario-row" key={s.id}>
+                  <button
+                    className="scenario-item"
+                    onClick={() => {
+                      setYaml(s.yaml);
+                      setName(s.name);
+                    }}
+                  >
+                    <FileCode2 size={17} />
+                    <span>
+                      {s.name}
+                      <small>
+                        <Stamp at={s.createdAt} format={day} />
+                      </small>
+                    </span>
+                    <ChevronRight size={14} />
+                  </button>
+                  <button
+                    className="scenario-delete"
+                    aria-label={`Delete scenario ${s.name}`}
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Delete saved scenario "${s.name}"?`))
+                        remove.mutate(s.id);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               ))
             ) : (
               <p>No saved scenarios yet.</p>
@@ -2068,7 +2091,7 @@ export function WorkerPicker({
   query: string;
   onQuery: (q: string) => void;
 }) {
-  const many = workers.length > 6;
+  const many = workers.length > 1;
   const shown = workers.filter((w) =>
     workerSearchText(w).includes(query.trim().toLowerCase()),
   );

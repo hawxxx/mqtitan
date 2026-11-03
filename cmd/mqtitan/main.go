@@ -79,7 +79,7 @@ func run(args []string) error {
 		return serve(args[1:])
 	case "worker":
 		return workerCommand(args[1:])
-	case "status", "stop", "results", "export", "workers":
+	case "status", "stop", "results", "export", "workers", "scenarios", "delete-scenario":
 		return remoteCommand(args[0], args[1:])
 	case "doctor":
 		for _, c := range platform.Doctor() {
@@ -103,7 +103,7 @@ func run(args []string) error {
 	}
 }
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: mqtitan <quick|validate|plan|run|serve|worker|status|stop|results|export|workers|doctor|version>\nquick --broker mqtt://localhost:1883 --clients 10000 --rate 1\nserve --listen 127.0.0.1:8080 --data mqtitan.db\nrun scenario.yaml [--controller http://localhost:8080] [--workers worker-a,worker-b]\n\nEnvironment: MQTITAN_CONTROLLER (default --controller), MQTITAN_TOKEN (bearer token), MQTITAN_MQTT_PASSWORD")
+	fmt.Fprintln(os.Stderr, "usage: mqtitan <quick|validate|plan|run|serve|worker|status|stop|results|export|workers|scenarios|delete-scenario|doctor|version>\nquick --broker mqtt://localhost:1883 --clients 10000 --rate 1\nserve --listen 127.0.0.1:8080 --data mqtitan.db\nrun scenario.yaml [--controller http://localhost:8080] [--workers worker-a,worker-b]\n\nEnvironment: MQTITAN_CONTROLLER (default --controller), MQTITAN_TOKEN (bearer token), MQTITAN_MQTT_PASSWORD")
 }
 
 func quick(args []string) error {

@@ -56,6 +56,8 @@ The scenario path or test ID on `run`, `stop`, `results`, and `export` may come 
 ./bin/mqtitan export TEST_ID --controller http://127.0.0.1:8080 --format csv
 ./bin/mqtitan stop TEST_ID --controller http://127.0.0.1:8080
 ./bin/mqtitan workers --controller http://127.0.0.1:8080
+./bin/mqtitan scenarios --controller http://127.0.0.1:8080
+./bin/mqtitan delete-scenario SCENARIO_ID --controller http://127.0.0.1:8080
 ```
 
 `results` returns metadata; `export` also includes stored aggregated samples. JSON export uses a `data` envelope; CSV is plain CSV. Reruns are available through the UI and API, not a dedicated CLI command.
