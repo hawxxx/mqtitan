@@ -16,6 +16,7 @@ import (
 	mrand "math/rand/v2"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,8 @@ type Engine struct {
 	connector      *transport.Connector
 	// churnDelay overrides [churnDelayMin, churnDelayMax] in tests.
 	churnDelay [2]time.Duration
+	tableOnce  sync.Once
+	table      []uint16
 }
 
 // A churned client waits a jittered pause before reconnecting with the same
@@ -76,8 +79,23 @@ func (e *Engine) Run(ctx context.Context) error {
 		return err
 	}
 	e.connector = connector
+	if e.Scenario.Interleaved() {
+		seen := map[uint16]bool{}
+		for i, wi := range e.workloadTable() {
+			if seen[wi] {
+				continue
+			}
+			seen[wi] = true
+			if _, err := e.generator(i + 1); err != nil {
+				return fmt.Errorf("workload payload: %w", err)
+			}
+		}
+	}
 	offset := 0
 	for _, w := range e.Scenario.Workloads {
+		if e.Scenario.Interleaved() {
+			break
+		}
 		offset += w.Clients
 		if _, err := e.generator(min(offset, e.Scenario.Clients.Count)); err != nil {
 			return fmt.Errorf("workload payload: %w", err)
@@ -149,7 +167,19 @@ func (e *Engine) Run(ctx context.Context) error {
 	}
 	return ctx.Err()
 }
+
+// workloadTable is the interleaved layout of this engine's clients, built once.
+func (e *Engine) workloadTable() []uint16 {
+	e.tableOnce.Do(func() { e.table = e.Scenario.WorkloadTable() })
+	return e.table
+}
 func (e *Engine) workload(seq int) scenario.Workload {
+	if e.Scenario.Interleaved() {
+		if t := e.workloadTable(); seq >= 1 && seq <= len(t) && int(t[seq-1]) < len(e.Scenario.Workloads) {
+			return e.Scenario.Workloads[t[seq-1]]
+		}
+		return scenario.Workload{Type: "connection"}
+	}
 	offset := 0
 	for _, w := range e.Scenario.Workloads {
 		offset += w.Clients

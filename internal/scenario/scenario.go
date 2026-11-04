@@ -105,6 +105,14 @@ type Clients struct {
 	IDTemplate     string `yaml:"idTemplate"`
 	SequenceOffset int    `yaml:"sequenceOffset,omitempty"`
 	Worker         string `yaml:"worker,omitempty"`
+	// WorkloadOrder is "contiguous" (default) or "interleaved"; see
+	// OrderInterleaved.
+	WorkloadOrder string `yaml:"workloadOrder,omitempty"`
+	// Population and PartitionStart are set by the controller on a worker
+	// partition of an interleaved scenario: the partition holds clients
+	// PartitionStart..PartitionStart+Count of a Population-client layout.
+	Population     int `yaml:"population,omitempty"`
+	PartitionStart int `yaml:"partitionStart,omitempty"`
 	// Lifetime ends each session after a random duration in [min, max] and
 	// reconnects, producing steady connection churn.
 	Lifetime *Lifetime `yaml:"lifetime,omitempty"`
@@ -292,6 +300,15 @@ func (s Scenario) Validate() error {
 	if s.Clients.Count > 1 && !sequencePattern.MatchString(s.Clients.IDTemplate) {
 		problems = append(problems, "clients.idTemplate requires ${sequence} for unique IDs")
 	}
+	if err := validWorkloadOrder(s.Clients.WorkloadOrder); err != nil {
+		problems = append(problems, err.Error())
+	}
+	if s.Clients.Population < 0 || s.Clients.PartitionStart < 0 || (s.Clients.Population > 0 && s.Clients.PartitionStart+s.Clients.Count > s.Clients.Population) || ((s.Clients.Population > 0 || s.Clients.PartitionStart > 0) && !s.Interleaved()) {
+		problems = append(problems, "clients.population and clients.partitionStart are set by the controller for interleaved partitions only")
+	}
+	if len(s.Workloads) > 1024 && s.Interleaved() {
+		problems = append(problems, "interleaved workloads allow at most 1024 workload groups")
+	}
 	if s.Clients.SequenceOffset < 0 {
 		problems = append(problems, "clients.sequenceOffset cannot be negative")
 	}
@@ -323,7 +340,7 @@ func (s Scenario) Validate() error {
 		if w.Type != "publisher" && w.Type != "subscriber" && w.Type != "connection" && w.Type != "mixed" {
 			problems = append(problems, "unknown workload type "+w.Type)
 		}
-		if w.Clients <= 0 || w.Clients > s.Clients.Count {
+		if w.Clients <= 0 || w.Clients > s.PopulationSize() {
 			problems = append(problems, "workload clients outside client population")
 		}
 		if w.Topic == "" && w.Type != "connection" {
@@ -350,7 +367,7 @@ func (s Scenario) Validate() error {
 			problems = append(problems, fmt.Sprintf("workload %q payload: %v", w.Name, err))
 		}
 	}
-	if population > s.Clients.Count {
+	if population > s.PopulationSize() {
 		problems = append(problems, "workload populations exceed clients.count")
 	}
 	problems = append(problems, s.Safety.check(s)...)
@@ -427,8 +444,23 @@ func (s Scenario) PlanWith(o PlanOptions) Plan {
 	rate := 0.0
 	offset := 0
 	var warnings []string
-	for _, w := range s.Workloads {
+	reached := make([]int, len(s.Workloads))
+	if s.Interleaved() {
+		// Stage targets select a prefix of the population; count what the
+		// interleaved layout puts in it.
+		whole := s
+		whole.Clients.Count, whole.Clients.Population, whole.Clients.PartitionStart = s.PopulationSize(), 0, 0
+		for _, wi := range whole.WorkloadTable()[:min(peak, whole.Clients.Count)] {
+			if int(wi) < len(reached) {
+				reached[wi]++
+			}
+		}
+	}
+	for wi, w := range s.Workloads {
 		n := max(0, min(w.Clients, peak-offset))
+		if s.Interleaved() {
+			n = reached[wi]
+		}
 		if n == 0 {
 			warnings = append(warnings, fmt.Sprintf("workload %q (clients %d-%d) never connects: the highest stage target is %d; reorder workloads or raise a stage target", w.Name, offset+1, offset+w.Clients, peak))
 		}

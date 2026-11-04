@@ -2,6 +2,7 @@ package distributed
 
 import (
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	"gopkg.in/yaml.v3"
 	"reflect"
 	"testing"
 	"time"
@@ -106,6 +107,36 @@ thresholds:
 			if !ok {
 				t.Errorf("partition %d lost %s:\n%s", i, name, raw)
 			}
+		}
+	}
+}
+
+func TestInterleavedPartitionSpreadsEveryWorkload(t *testing.T) {
+	s := scenario.Scenario{Clients: scenario.Clients{Count: 90, IDTemplate: "c-${sequence}", WorkloadOrder: scenario.OrderInterleaved}, Stages: []scenario.Stage{{Duration: scenario.Duration{Duration: time.Second}, TargetClients: 90}}, Workloads: []scenario.Workload{{Name: "sub", Type: "subscriber", Topic: "t", Clients: 60}, {Name: "pub", Type: "publisher", Topic: "t", Clients: 30}}}
+	for i := 0; i < 3; i++ {
+		p, err := Partition(s, i, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Clients.Count != 30 || p.Clients.Population != 90 || p.Clients.PartitionStart != i*30 {
+			t.Fatalf("partition %d clients = %+v", i, p.Clients)
+		}
+		subs := 0
+		for _, w := range p.WorkloadTable() {
+			if w == 0 {
+				subs++
+			}
+		}
+		if subs != 20 {
+			t.Fatalf("partition %d holds %d of 60 subscribers, want 20", i, subs)
+		}
+		raw, err := scenario.Encode(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back scenario.Scenario
+		if err := yaml.Unmarshal(raw, &back); err != nil || back.Clients != p.Clients {
+			t.Fatalf("partition %d clients do not round-trip: %+v %v", i, back.Clients, err)
 		}
 	}
 }
