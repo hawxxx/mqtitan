@@ -196,16 +196,29 @@ func (m *Manager) checkWorkers(r *execution) workerCheck {
 	return c
 }
 func (m *Manager) runDistributed(ctx context.Context, r *execution) error {
-	defer m.stopAssignments(r)
+	suspended := false
+	defer func() {
+		if !suspended {
+			m.stopAssignments(r)
+		}
+	}()
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			if m.suspending(r) {
+				// Leave the workers running; the next controller resumes them.
+				suspended = true
+				return errSuspended
+			}
 			m.drain(r)
 			return ctx.Err()
 		case <-tick.C:
 			c := m.checkWorkers(r)
+			if len(c.newLost) > 0 || len(c.replaced) > 0 {
+				m.saveCheckpoint(r, r.fromAPI)
+			}
 			if len(c.newLost) > 0 || len(c.failed) > 0 {
 				m.mu.Lock()
 				for _, rep := range c.replaced {

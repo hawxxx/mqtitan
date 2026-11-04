@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -82,9 +83,10 @@ type execution struct {
 	replacements  []ReplacedWorker
 	// Immutable after start, so the registry-locked checks can read them
 	// without touching r.test.
-	maxLost     int
-	replaceLost bool
-	standby     []string
+	maxLost       int
+	replaceLost   bool
+	standby       []string
+	stopRequested atomic.Bool
 	// Guarded by Manager.mu.
 	brokers    []emqx.FleetSample
 	events     []LogEvent
@@ -106,11 +108,26 @@ type Manager struct {
 	telemetryHosts []string
 	// telemetryEvery overrides the scenario poll interval; tests only.
 	telemetryEvery time.Duration
+	// resume keeps distributed runs alive across a controller restart; see
+	// resume.go. pendingResume holds the running tests found at startup.
+	resume        bool
+	pendingResume []Test
+}
+
+// ManagerOptions configures NewManagerWith.
+type ManagerOptions struct {
+	// ResumeRuns leaves distributed runs running when the controller shuts
+	// down gracefully and resumes them on the next start (call Resume).
+	ResumeRuns bool
 }
 
 func NewManager(store *storage.Store) (*Manager, error) {
+	return NewManagerWith(store, ManagerOptions{})
+}
+
+func NewManagerWith(store *storage.Store, o ManagerOptions) (*Manager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &Manager{store: store, runs: make(map[string]*execution), ctx: ctx, cancel: cancel}
+	m := &Manager{store: store, runs: make(map[string]*execution), ctx: ctx, cancel: cancel, resume: o.ResumeRuns}
 	records, err := store.List("tests", 1000)
 	if err != nil {
 		cancel()
@@ -122,16 +139,17 @@ func NewManager(store *storage.Store) (*Manager, error) {
 			cancel()
 			return nil, err
 		}
+		if t.Status == "running" && m.resume && len(t.WorkerIDs) > 0 {
+			m.pendingResume = append(m.pendingResume, t)
+			continue
+		}
 		if t.Status == "running" {
-			now := time.Now().UTC()
-			t.Status = "interrupted"
-			t.EndedAt = &now
-			t.Error = "controller restarted before test completed"
-			if err = m.persist(t); err != nil {
+			err = m.interrupt(t, "controller restarted before test completed")
+			if err != nil {
 				cancel()
 				return nil, err
 			}
-			noteInterrupted(store, t.ID, now)
+			continue
 		}
 	}
 	m.workers = newWorkerRegistry()
@@ -279,6 +297,7 @@ func (m *Manager) startTest(raw string, workerIDs []string, o StartOptions, sour
 		return Test{}, err
 	}
 	m.runs[t.ID] = r
+	m.saveCheckpoint(r, fromAPI)
 	m.logEvent(r, "info", "%s", startMessage(s, ids))
 	r.stage = 0
 	m.logEvent(r, "info", "%s", stageMessage(s.Stages, 0))
@@ -350,6 +369,17 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 		case err := <-done:
 			record()
 			stopTelemetry()
+			if errors.Is(err, errSuspended) {
+				// Shutting down with the run still going on its workers: keep
+				// the test running in the store and write the final state.
+				m.persistEvents(r)
+				m.saveCheckpoint(r, r.fromAPI)
+				m.mu.Lock()
+				delete(m.runs, r.test.ID)
+				m.mu.Unlock()
+				r.cancel()
+				return
+			}
 			now := time.Now().UTC()
 			var balance *emqx.Balance
 			m.mu.Lock()
@@ -407,6 +437,7 @@ func (m *Manager) execute(ctx context.Context, r *execution, s scenario.Scenario
 			// Free the workers while still holding m.mu: once the status leaves
 			// "running", Start no longer reports ErrBusy and may assign them.
 			m.releaseAssignments(r)
+			m.deleteCheckpoint(t.ID)
 			m.notify(r, Event{"status", publicTest(t)})
 			m.mu.Unlock()
 			if err := m.persist(t); err != nil {
@@ -493,6 +524,7 @@ func (m *Manager) Stop(id string) error {
 		_, err := m.Get(id)
 		return err
 	}
+	r.stopRequested.Store(true)
 	r.cancel()
 	return nil
 }
