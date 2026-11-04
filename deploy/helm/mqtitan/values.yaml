@@ -35,6 +35,10 @@ auth:
     # NetworkPolicy egress rules that let the controller reach the IdP.
     egress: []
 controller:
+  # Keep distributed runs alive across a controller restart or upgrade: the
+  # controller checkpoints each run, leaves it running on shutdown and resumes
+  # it on start. Set worker.controllerGrace to cover the restart time.
+  resumeRuns: false
   resources:
     requests: {cpu: 250m, memory: 256Mi}
     limits: {cpu: "2", memory: 2Gi}
@@ -55,6 +59,9 @@ persistence:
   storageClass: ""
 worker:
   replicas: 0
+  # How long a worker keeps generating load without reaching the controller
+  # (default 15s). Use e.g. "3m" together with controller.resumeRuns.
+  controllerGrace: ""
   resources:
     requests: {cpu: "1", memory: 1Gi}
     limits: {cpu: "4", memory: 8Gi}

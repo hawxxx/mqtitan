@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/platform"
 	"github.com/mqtitan/mqtitan/internal/scenario"
+	"github.com/mqtitan/mqtitan/internal/storage"
 )
 
 func register(t *testing.T, r *workerRegistry, id string) string {
@@ -529,5 +531,126 @@ func TestNoReplacementWhenOffOrPastLastStage(t *testing.T) {
 	}
 	if _, err := fastForward(partitionYAML, time.Now().Add(-10*time.Minute), time.Now()); err == nil {
 		t.Fatal("fast-forward past the last stage must fail")
+	}
+}
+
+func newResumeManager(t *testing.T, path string, resume bool) *Manager {
+	t.Helper()
+	s, err := storage.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := NewManagerWith(s, ManagerOptions{ResumeRuns: resume})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { m.Close(); s.Close() })
+	return m
+}
+
+func startOnTwoWorkers(t *testing.T, m *Manager) (Test, map[string]string) {
+	t.Helper()
+	sessions := map[string]string{}
+	for _, id := range []string{"a", "b"} {
+		sessions[id] = register(t, m.workers, id)
+		if _, err := m.workers.heartbeat(Heartbeat{ID: id, Session: sessions[id], ClientTime: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run, err := m.StartOnWorkers(strings.Replace(partitionYAML, "count: 2", "count: 4", 1), []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run, sessions
+}
+
+func TestRunResumesAfterGracefulControllerRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resume.db")
+	m := newResumeManager(t, path, true)
+	run, sessions := startOnTwoWorkers(t, m)
+	hb, err := m.workers.heartbeat(Heartbeat{ID: "a", Session: sessions["a"], ClientTime: time.Now()})
+	if err != nil || hb.Assignment == nil {
+		t.Fatalf("no assignment for a: %v", err)
+	}
+	assignmentA := hb.Assignment.ID
+	m.Close() // graceful shutdown: the run must stay alive on its workers
+
+	m2 := newResumeManager(t, path, true)
+	m2.Resume()
+	stored, err := m2.Get(run.ID)
+	if err != nil || stored.Status != "running" {
+		t.Fatalf("after restart: status %q err %v", stored.Status, err)
+	}
+	// Workers present their old sessions and keep their assignments.
+	for _, id := range []string{"a", "b"} {
+		hb, err := m2.workers.heartbeat(Heartbeat{ID: id, Session: sessions[id], ClientTime: time.Now()})
+		if err != nil || hb.Assignment == nil || hb.Assignment.Stop {
+			t.Fatalf("worker %s after restart: %+v %v", id, hb, err)
+		}
+		if id == "a" && hb.Assignment.ID != assignmentA {
+			t.Fatalf("assignment changed: %s -> %s", assignmentA, hb.Assignment.ID)
+		}
+	}
+	// Finishing the partitions completes the resumed run.
+	for _, id := range []string{"a", "b"} {
+		hb, _ := m2.workers.heartbeat(Heartbeat{ID: id, Session: sessions[id], ClientTime: time.Now()})
+		rep := &Report{AssignmentID: hb.Assignment.ID, Sequence: 1, Done: true, Snapshot: metrics.Snapshot{Published: 50, ConnectAttempts: 2, PeakConnected: 2}}
+		if _, err := m2.workers.heartbeat(Heartbeat{ID: id, Session: sessions[id], ClientTime: time.Now(), Report: rep}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, _ := m2.Get(run.ID); got.Status != "running" {
+			if got.Status != "completed" || got.Snapshot.Published != 100 {
+				t.Fatalf("resumed run ended %q with %d published (%s)", got.Status, got.Snapshot.Published, got.Error)
+			}
+			if _, err := m2.store.Get("checkpoints", run.ID); err == nil {
+				t.Fatal("checkpoint not removed after the run ended")
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("resumed run did not finish")
+}
+
+func TestShutdownWithoutResumeStopsAndExplicitStopStillStops(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "plain.db")
+	m := newResumeManager(t, path, false)
+	run, _ := startOnTwoWorkers(t, m)
+	m.Close()
+	m2 := newResumeManager(t, path, false)
+	// Without ResumeRuns a graceful shutdown stops the run, as before.
+	if got, _ := m2.Get(run.ID); got.Status != "stopped" {
+		t.Fatalf("without ResumeRuns status = %q", got.Status)
+	}
+
+	path = filepath.Join(t.TempDir(), "stop.db")
+	m3 := newResumeManager(t, path, true)
+	run, _ = startOnTwoWorkers(t, m3)
+	if err := m3.Stop(run.ID); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, _ := m3.Get(run.ID); got.Status == "stopped" {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("explicit stop did not stop a resumable run")
+}
+
+func TestUnresumableRunIsInterrupted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gone.db")
+	m := newResumeManager(t, path, true)
+	run, _ := startOnTwoWorkers(t, m)
+	m.Close()
+	m2 := newResumeManager(t, path, true)
+	_ = m2.store.Delete("checkpoints", run.ID)
+	m2.Resume()
+	if got, _ := m2.Get(run.ID); got.Status != "interrupted" {
+		t.Fatalf("status = %q", got.Status)
 	}
 }

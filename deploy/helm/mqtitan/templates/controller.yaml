@@ -43,6 +43,9 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args: ["serve", "--listen", "0.0.0.0:8080", "--data", "/data/mqtitan.db", "--web", "/app/web/dist"]
           env:
+            {{- if .Values.controller.resumeRuns }}
+            - {name: MQTITAN_RESUME_RUNS, value: "true"}
+            {{- end }}
             - name: MQTITAN_TOKEN
               valueFrom:
                 secretKeyRef:

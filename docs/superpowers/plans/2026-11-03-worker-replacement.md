@@ -32,6 +32,10 @@ Today a restart marks active tests `interrupted` and workers drop their runs.
 
 Tests: restart mid-run with workers alive; restart with workers dead; stale session rejected after grace.
 
+## Implemented notes
+
+Phase 1 shipped as `replaceLostWorkers`. Phase 2 shipped as opt-in `MQTITAN_RESUME_RUNS`: the checkpoint holds worker sessions and assignments only. Worker reports are not persisted because workers resend cumulative counters after the controller returns; the session of every worker is accepted again, so workers need no re-registration.
+
 ## Out of scope
 
 Transferring live MQTT sessions between workers, multi-controller HA, and automatic Kubernetes scaling.

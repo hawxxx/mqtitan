@@ -23,7 +23,11 @@ import (
 
 type Options struct {
 	Controller, ID, Token, Version string
-	OnReady                        func(bool)
+	// ControllerGrace is how long a worker keeps generating load without
+	// reaching the controller; zero means 15 seconds. Raise it so a restarting
+	// controller can resume the run.
+	ControllerGrace time.Duration
+	OnReady         func(bool)
 }
 type httpStatusError struct{ status int }
 
@@ -99,6 +103,10 @@ func Run(ctx context.Context, opts Options) error {
 	host := platform.HostInfo(opts.Version)
 	var sequence uint64
 	lastContact := time.Now()
+	grace := opts.ControllerGrace
+	if grace <= 0 {
+		grace = 15 * time.Second
+	}
 	var current *running
 	lastAssignment := ""
 	defer func() {
@@ -247,7 +255,7 @@ func Run(ctx context.Context, opts Options) error {
 						current.cancel()
 					}
 				}
-				if time.Since(lastContact) > 15*time.Second && current != nil {
+				if time.Since(lastContact) > grace && current != nil {
 					current.cancel()
 				}
 			}

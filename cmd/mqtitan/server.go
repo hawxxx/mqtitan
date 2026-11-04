@@ -88,7 +88,7 @@ func openServer(o runOptions) (*localServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	m, err := api.NewManager(s)
+	m, err := api.NewManagerWith(s, api.ManagerOptions{ResumeRuns: os.Getenv("MQTITAN_RESUME_RUNS") == "true"})
 	if err != nil {
 		s.Close()
 		return nil, err
@@ -98,6 +98,7 @@ func openServer(o runOptions) (*localServer, error) {
 	}
 	m.SetCredentials(emqx.Credentials{APIKey: os.Getenv("MQTITAN_EMQX_API_KEY"), APISecret: os.Getenv("MQTITAN_EMQX_API_SECRET"), PromToken: os.Getenv("MQTITAN_PROMETHEUS_TOKEN"), PromUser: os.Getenv("MQTITAN_PROMETHEUS_USERNAME"), PromPassword: os.Getenv("MQTITAN_PROMETHEUS_PASSWORD")})
 	m.SetTelemetryAllowedHosts(os.Getenv("MQTITAN_TELEMETRY_ALLOWED_HOSTS"))
+	m.Resume()
 	listener, err := net.Listen("tcp", o.Listen)
 	if err != nil {
 		m.Close()
@@ -286,6 +287,7 @@ func workerCommand(args []string) error {
 	f := flag.NewFlagSet("worker", flag.ContinueOnError)
 	controller := f.String("controller", controllerDefault("http://127.0.0.1:8080"), "controller URL (env MQTITAN_CONTROLLER)")
 	id := f.String("id", "", "unique worker ID")
+	grace := f.Duration("controller-grace", 15*time.Second, "keep generating load this long without reaching the controller (raise it so a restarting controller can resume the run)")
 	health := f.String("health-listen", "127.0.0.1:8081", "health-only listen address")
 	if err := f.Parse(args); err != nil {
 		return err
@@ -313,7 +315,7 @@ func workerCommand(args []string) error {
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(listener) }()
 	defer srv.Close()
-	err = worker.Run(ctx, worker.Options{Controller: *controller, ID: *id, Token: workerToken(), Version: version, OnReady: ready.Store})
+	err = worker.Run(ctx, worker.Options{Controller: *controller, ID: *id, Token: workerToken(), Version: version, ControllerGrace: *grace, OnReady: ready.Store})
 	if errors.Is(err, context.Canceled) {
 		return nil
 	}
