@@ -75,6 +75,9 @@ type workerRegistry struct {
 	workers map[string]*workerState
 }
 
+// MaxWorkers bounds the worker registry and the worker count of a plan.
+const MaxWorkers = 1024
+
 // workerLease is how long a worker stays live without a heartbeat.
 const workerLease = 15 * time.Second
 
@@ -102,8 +105,8 @@ func (r *workerRegistry) register(w Worker) (string, error) {
 	now := time.Now().UTC()
 	r.prune(now)
 	existing := r.workers[w.ID]
-	if existing == nil && len(r.workers) >= 256 {
-		return "", errors.New("worker registry full (256 workers)")
+	if existing == nil && len(r.workers) >= MaxWorkers {
+		return "", fmt.Errorf("worker registry full (%d workers)", MaxWorkers)
 	}
 	owner := existing != nil && w.Session != "" && subtle.ConstantTimeCompare([]byte(w.Session), []byte(existing.Session)) == 1
 	if existing != nil && existing.assignment != nil {

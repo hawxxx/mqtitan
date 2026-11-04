@@ -24,6 +24,7 @@ import (
 type runOptions struct {
 	Listen, Data, Controller, Workers, Web string
 	AllowRemote                            bool
+	MaxLostWorkers                         int
 }
 
 func runFlags(f *flag.FlagSet) *runOptions {
@@ -32,6 +33,7 @@ func runFlags(f *flag.FlagSet) *runOptions {
 	f.StringVar(&o.Data, "data", "mqtitan.db", "encrypted SQLite database")
 	f.StringVar(&o.Controller, "controller", controllerDefault(""), "remote controller URL (env MQTITAN_CONTROLLER)")
 	f.StringVar(&o.Workers, "workers", "", "comma-separated distributed worker IDs")
+	f.IntVar(&o.MaxLostWorkers, "max-lost-workers", 0, "keep the test running while at most this many workers lose their lease")
 	f.StringVar(&o.Web, "web", "", "override embedded UI asset directory")
 	return o
 }
@@ -212,14 +214,14 @@ func executeScenario(raw string, o runOptions) error {
 	ctx, cancel := signalContext()
 	defer cancel()
 	if o.Controller != "" {
-		return remoteRun(ctx, o.Controller, raw, ids)
+		return remoteRun(ctx, o.Controller, raw, ids, o.MaxLostWorkers)
 	}
 	l, err := openServer(o)
 	if err != nil {
 		return err
 	}
 	defer l.Close()
-	test, err := l.manager.StartLocal(raw, ids)
+	test, err := l.manager.StartLocalTolerant(raw, ids, o.MaxLostWorkers)
 	if err != nil {
 		return err
 	}

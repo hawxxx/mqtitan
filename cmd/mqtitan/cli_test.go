@@ -95,7 +95,7 @@ func TestInterruptDuringPollStopsRemoteTest(t *testing.T) {
 		}
 		cancel()
 	}()
-	err := remoteRun(ctx, srv.URL, "scenario", nil)
+	err := remoteRun(ctx, srv.URL, "scenario", nil, 0)
 	var exit exitError
 	if !errors.As(err, &exit) || exit.code != 130 {
 		t.Fatalf("got %v", err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/mqtitan/mqtitan/internal/api"
 	"github.com/mqtitan/mqtitan/internal/mqtt"
 	"github.com/mqtitan/mqtitan/internal/observability"
 	"github.com/mqtitan/mqtitan/internal/platform"
@@ -207,8 +208,8 @@ func planCommand(w io.Writer, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *workers < 1 || *workers > 256 {
-		return errors.New("--workers must be between 1 and 256")
+	if *workers < 1 || *workers > api.MaxWorkers {
+		return fmt.Errorf("--workers must be between 1 and %d", api.MaxWorkers)
 	}
 	opts := scenario.PlanOptions{Workers: *workers}
 	var resolveWarn string
