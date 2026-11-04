@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/hawxxx/mqtitan/compare/v0.7.0...v0.8.0) (2026-11-04)
+
+
+### Features
+
+* abort a worker assignment before it is OOM-killed ([#70](https://github.com/hawxxx/mqtitan/issues/70)) ([dc16e6c](https://github.com/hawxxx/mqtitan/commit/dc16e6c647ae5c03a8b7a7e89d61788d6f882228))
+* delete saved scenarios from UI, API and CLI ([#66](https://github.com/hawxxx/mqtitan/issues/66)) ([6f5db3d](https://github.com/hawxxx/mqtitan/commit/6f5db3d1d4c51d1e6f88f26437c926c96e91e62e))
+* raise worker limit to 1024 and tolerate lost workers ([#68](https://github.com/hawxxx/mqtitan/issues/68)) ([869be50](https://github.com/hawxxx/mqtitan/commit/869be50b78cde42a0d52dfbc135a0913f3b61d36))
+* remove lost workers on demand from UI, API and CLI ([#71](https://github.com/hawxxx/mqtitan/issues/71)) ([6cd92a7](https://github.com/hawxxx/mqtitan/commit/6cd92a7f936d41dc4e1e93756b1bfb781d694499))
+* replace lost workers with idle workers ([#73](https://github.com/hawxxx/mqtitan/issues/73)) ([33408ac](https://github.com/hawxxx/mqtitan/commit/33408ac83facc44e22d5c969767a20806815ccfd))
+* spread workloads across workers with clients.workloadOrder: interleaved ([#72](https://github.com/hawxxx/mqtitan/issues/72)) ([ef877ac](https://github.com/hawxxx/mqtitan/commit/ef877ac59908c9709a0a8585ac575386152d26e0))
+
 ## [0.7.0](https://github.com/hawxxx/mqtitan/compare/v0.6.2...v0.7.0) (2026-10-29)
 
 
