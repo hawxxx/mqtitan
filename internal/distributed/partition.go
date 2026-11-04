@@ -24,6 +24,13 @@ func Partition(s scenario.Scenario, index, count int) (scenario.Scenario, error)
 	for i, st := range out.Stages {
 		out.Stages[i].TargetClients = max(0, min(size, st.TargetClients-start))
 	}
+	if s.Interleaved() {
+		// Keep the global workload list: the partition computes its slice of
+		// the interleaved layout from the population and its start.
+		out.Clients.Population = s.PopulationSize()
+		out.Clients.PartitionStart = s.Clients.PartitionStart + start
+		return out, nil
+	}
 	out.Workloads = nil
 	offset := 0
 	for _, w := range s.Workloads {

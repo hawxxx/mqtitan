@@ -152,11 +152,19 @@ func (s Scenario) CheckRendered(worker string, from, to int) error {
 	}
 	end := 0
 	wi := 0
+	var table []uint16
+	if s.Interleaved() {
+		table = s.WorkloadTable()
+	}
 	var idBuf, topicBuf []byte
 	for local := 1; local <= to-from; local++ {
-		for wi < len(s.Workloads) && local > end+s.Workloads[wi].Clients {
-			end += s.Workloads[wi].Clients
-			wi++
+		if table != nil {
+			wi = int(table[local-1])
+		} else {
+			for wi < len(s.Workloads) && local > end+s.Workloads[wi].Clients {
+				end += s.Workloads[wi].Clients
+				wi++
+			}
 		}
 		seq := local + from
 		idBuf = idTemplate.appendTo(idBuf[:0], seq, "")

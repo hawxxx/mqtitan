@@ -765,3 +765,25 @@ func TestRatePeriodSaturatesTinyRates(t *testing.T) {
 		t.Fatalf("ratePeriod(10) = %s, want 100ms", got)
 	}
 }
+
+func TestInterleavedWorkloadLookup(t *testing.T) {
+	e := &Engine{Scenario: scenario.Scenario{
+		Clients:   scenario.Clients{Count: 10, IDTemplate: "c-${sequence}", WorkloadOrder: scenario.OrderInterleaved},
+		Workloads: []scenario.Workload{{Name: "sub", Type: "subscriber", Clients: 5}, {Name: "pub", Type: "publisher", Clients: 3}},
+	}}
+	got := map[string]int{}
+	for seq := 1; seq <= 10; seq++ {
+		w := e.workload(seq)
+		if w.Name == "" {
+			got["connection"]++
+		} else {
+			got[w.Name]++
+		}
+	}
+	if got["sub"] != 5 || got["pub"] != 3 || got["connection"] != 2 {
+		t.Fatalf("workload mix = %v", got)
+	}
+	if first := e.workload(1); first.Name != "sub" {
+		t.Fatalf("client 1 = %q", first.Name)
+	}
+}
