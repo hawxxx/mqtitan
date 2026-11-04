@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/mqtitan ./cmd/mqtitan
 
-FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS runtime
+FROM alpine:3.24@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6 AS runtime
 RUN --mount=type=cache,target=/etc/apk/cache,sharing=locked \
     apk upgrade && apk add ca-certificates && \
     addgroup -g 10001 mqtitan && adduser -D -u 10001 -G mqtitan mqtitan && \
