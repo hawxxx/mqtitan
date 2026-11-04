@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -364,5 +365,64 @@ func TestRegistryAllowsMoreThan256Workers(t *testing.T) {
 	}
 	if _, err := r.register(Worker{ID: "extra"}); err == nil {
 		t.Fatal("registry exceeded MaxWorkers")
+	}
+}
+
+func TestRemoveOnlyLostUnassignedWorkers(t *testing.T) {
+	r := newWorkerRegistry()
+	for _, id := range []string{"live", "lost", "busy", "gone"} {
+		register(t, r, id)
+	}
+	assign(r, "busy", "a1")
+	r.mu.Lock()
+	for _, id := range []string{"lost", "busy", "gone"} {
+		r.workers[id].LastSeen = time.Now().Add(-time.Minute)
+	}
+	r.mu.Unlock()
+	if err := r.remove("live"); !errors.Is(err, errWorkerNotRemovable) {
+		t.Fatalf("live worker removed: %v", err)
+	}
+	if err := r.remove("busy"); !errors.Is(err, errWorkerNotRemovable) {
+		t.Fatalf("worker with a running assignment removed: %v", err)
+	}
+	if err := r.remove("nope"); !errors.Is(err, errWorkerNotFound) {
+		t.Fatalf("missing worker: %v", err)
+	}
+	if err := r.remove("lost"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.removeLost(); len(got) != 1 || got[0] != "gone" {
+		t.Fatalf("removeLost = %v", got)
+	}
+	if got := r.list(); len(got) != 2 {
+		t.Fatalf("remaining = %+v", got)
+	}
+}
+
+func TestRemoveLostWorkersEndpoints(t *testing.T) {
+	m, h := setup(t)
+	register(t, m.workers, "old")
+	m.workers.mu.Lock()
+	m.workers.workers["old"].LastSeen = time.Now().Add(-time.Minute)
+	m.workers.mu.Unlock()
+	do := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("DELETE", path, nil)
+		req.Header.Set("Authorization", "Bearer controller-secret")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		return w
+	}
+	if w := do("/api/v1/workers"); w.Code != 400 {
+		t.Fatalf("bulk without status: %d", w.Code)
+	}
+	if w := do("/api/v1/workers/missing"); w.Code != 404 {
+		t.Fatalf("missing: %d", w.Code)
+	}
+	if w := do("/api/v1/workers?status=lost"); w.Code != 200 || !strings.Contains(w.Body.String(), `"old"`) {
+		t.Fatalf("bulk: %d %s", w.Code, w.Body.String())
+	}
+	register(t, m.workers, "again")
+	if w := do("/api/v1/workers/again"); w.Code != 409 {
+		t.Fatalf("live worker: %d", w.Code)
 	}
 }
