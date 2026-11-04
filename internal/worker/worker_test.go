@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/mqtitan/mqtitan/internal/platform"
 )
 
 func TestWorkerRegistersAuthenticatesAndCancels(t *testing.T) {
@@ -101,5 +103,26 @@ func TestWorkerSendsSessionAndKeepsRegistrationOnRejectedReport(t *testing.T) {
 	}
 	if registrations.Load() != 1 || beats.Load() < 2 {
 		t.Fatalf("rejected report forced re-registration: registrations=%d beats=%d", registrations.Load(), beats.Load())
+	}
+}
+
+func TestMemoryNearLimit(t *testing.T) {
+	gib := uint64(1 << 30)
+	cases := []struct {
+		name string
+		used uint64
+		host platform.Host
+		want bool
+	}{
+		{"unknown limit never aborts", 100 * gib, platform.Host{}, false},
+		{"below threshold", 8 * gib, platform.Host{MemoryLimitBytes: 10 * gib}, false},
+		{"at threshold", 9 * gib, platform.Host{MemoryLimitBytes: 10 * gib}, true},
+		{"container limit wins over host total", 5 * gib, platform.Host{MemoryLimitBytes: 5 * gib, MemoryTotalBytes: 64 * gib}, true},
+		{"falls back to host total", 60 * gib, platform.Host{MemoryTotalBytes: 64 * gib}, true},
+	}
+	for _, c := range cases {
+		if got := memoryNearLimit(c.used, c.host); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
 	}
 }
