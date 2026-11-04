@@ -24,21 +24,24 @@ import (
 var ErrBusy = errors.New("a test is already running; stop it before starting another")
 
 type Test struct {
-	ID           string              `json:"id"`
-	Name         string              `json:"name"`
-	Status       string              `json:"status"`
-	StartedAt    time.Time           `json:"startedAt"`
-	EndedAt      *time.Time          `json:"endedAt,omitempty"`
-	Scenario     string              `json:"scenario"`
-	Snapshot     metrics.Snapshot    `json:"snapshot"`
-	Thresholds   []thresholds.Result `json:"thresholds"`
-	Error        string              `json:"error,omitempty"`
-	LoadControl  *LoadControl        `json:"loadControl,omitempty"`
-	LoadChanges  []LoadChange        `json:"loadChanges,omitempty"`
-	WorkerIDs    []string            `json:"workerIds"`
-	LostWorkers  []string            `json:"lostWorkers,omitempty"`
-	SourceTestID string              `json:"sourceTestId,omitempty"`
-	Balance      *emqx.Balance       `json:"balance,omitempty"`
+	ID          string              `json:"id"`
+	Name        string              `json:"name"`
+	Status      string              `json:"status"`
+	StartedAt   time.Time           `json:"startedAt"`
+	EndedAt     *time.Time          `json:"endedAt,omitempty"`
+	Scenario    string              `json:"scenario"`
+	Snapshot    metrics.Snapshot    `json:"snapshot"`
+	Thresholds  []thresholds.Result `json:"thresholds"`
+	Error       string              `json:"error,omitempty"`
+	LoadControl *LoadControl        `json:"loadControl,omitempty"`
+	LoadChanges []LoadChange        `json:"loadChanges,omitempty"`
+	WorkerIDs   []string            `json:"workerIds"`
+	LostWorkers []string            `json:"lostWorkers,omitempty"`
+	// MaxLostWorkers is how many workers may lose their lease before the run
+	// fails; the default 0 fails on the first loss.
+	MaxLostWorkers int           `json:"maxLostWorkers,omitempty"`
+	SourceTestID   string        `json:"sourceTestId,omitempty"`
+	Balance        *emqx.Balance `json:"balance,omitempty"`
 }
 type Sample struct {
 	Timestamp   time.Time        `json:"timestamp"`
@@ -162,15 +165,29 @@ func (m *Manager) persist(t Test) error {
 
 func (m *Manager) Start(raw string) (Test, error) { return m.StartOnWorkers(raw, nil) }
 func (m *Manager) StartOnWorkers(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, "", decodeScenario, true)
+	return m.startTest(raw, workerIDs, 0, "", decodeScenario, true)
+}
+
+// StartLocalTolerant is StartLocal that tolerates up to maxLost lost workers.
+func (m *Manager) StartLocalTolerant(raw string, workerIDs []string, maxLost int) (Test, error) {
+	return m.startTest(raw, workerIDs, maxLost, "", decodeLocalScenario, false)
+}
+
+// StartOnWorkersTolerant is StartOnWorkers that keeps the test running while
+// at most maxLost workers lose their lease.
+func (m *Manager) StartOnWorkersTolerant(raw string, workerIDs []string, maxLost int) (Test, error) {
+	return m.startTest(raw, workerIDs, maxLost, "", decodeScenario, true)
 }
 
 // StartLocal starts a scenario supplied by the CLI user who owns this
 // in-process controller; unlike API submissions it may use TLS file paths.
 func (m *Manager) StartLocal(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, "", decodeLocalScenario, false)
+	return m.startTest(raw, workerIDs, 0, "", decodeLocalScenario, false)
 }
-func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string, decode func(string) (scenario.Scenario, error), fromAPI bool) (Test, error) {
+func (m *Manager) startTest(raw string, workerIDs []string, maxLost int, sourceTestID string, decode func(string) (scenario.Scenario, error), fromAPI bool) (Test, error) {
+	if maxLost < 0 || (maxLost > 0 && maxLost >= len(workerIDs)) {
+		return Test{}, fmt.Errorf("maxLostWorkers must be between 0 and %d (fewer than the workers assigned)", max(len(workerIDs)-1, 0))
+	}
 	s, err := decode(raw)
 	if err != nil {
 		return Test{}, err
@@ -204,7 +221,7 @@ func (m *Manager) startTest(raw string, workerIDs []string, sourceTestID string,
 	ctx, cancel := context.WithCancel(m.ctx)
 	ids := make([]string, len(workerIDs))
 	copy(ids, workerIDs)
-	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, SourceTestID: sourceTestID}
+	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, MaxLostWorkers: maxLost, SourceTestID: sourceTestID}
 	counters := metrics.New()
 	r := &execution{fromAPI: fromAPI, ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot, stage: -1}
 	if len(workerIDs) > 0 {

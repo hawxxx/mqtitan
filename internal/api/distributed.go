@@ -10,6 +10,7 @@ import (
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/scenario"
 	"go.opentelemetry.io/otel"
+	"slices"
 	"strings"
 	"time"
 )
@@ -69,7 +70,7 @@ func (m *Manager) workerSnapshot(r *execution) metrics.Snapshot {
 			continue
 		}
 		s := w.report.Snapshot
-		if time.Since(w.LastSeen) > workerLease || w.report.Done {
+		if time.Since(w.LastSeen) > workerLease || w.report.Done || r.isLost(id) {
 			// A lost or finished worker holds no live clients; its cumulative
 			// counters and histograms still count toward the result.
 			s.Connected, s.Connecting, s.TargetClients = 0, 0, 0
@@ -129,6 +130,62 @@ func (m *Manager) drain(r *execution) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// workerCheck is one pass over a distributed run's workers.
+type workerCheck struct {
+	all      bool     // every non-lost worker finished
+	failure  error    // non-nil when the run must stop
+	newLost  []string // workers newly marked lost this pass, tolerated or not
+	failed   []string // workers that reported an execution error
+	overflow bool     // lost workers exceed the tolerance
+}
+
+// isLost reports whether the worker was marked lost. Callers hold the
+// registry lock.
+func (r *execution) isLost(id string) bool {
+	return slices.Contains(r.lostWorkers, id)
+}
+
+// checkWorkers marks workers whose lease expired as lost. Up to
+// r.test.MaxLostWorkers lost workers are tolerated: the run continues with the
+// survivors and keeps the lost workers' last cumulative counters. A worker
+// that returns after being marked lost is told to stop, so it does not keep
+// generating load the run no longer accounts for as live.
+func (m *Manager) checkWorkers(r *execution) workerCheck {
+	m.workers.mu.Lock()
+	defer m.workers.mu.Unlock()
+	c := workerCheck{all: true}
+	for _, id := range r.workerIDs {
+		w := m.workers.workers[id]
+		if r.isLost(id) {
+			if w != nil && w.assignment != nil && w.assignment.TestID == r.test.ID {
+				w.assignment.Stop = true
+			}
+			continue
+		}
+		if w == nil || (time.Since(w.LastSeen) > workerLease && !w.report.Done) {
+			// A worker that already finished may go away safely.
+			r.lostWorkers = append(r.lostWorkers, id)
+			c.newLost = append(c.newLost, id)
+			if w != nil && w.assignment != nil {
+				w.assignment.Stop = true
+			}
+			continue
+		}
+		if !w.report.Done {
+			c.all = false
+		}
+		if w.report.Error != "" {
+			c.failure = errors.New("worker execution failed")
+			c.failed = append(c.failed, id)
+		}
+	}
+	if len(r.lostWorkers) > r.test.MaxLostWorkers {
+		c.overflow = true
+		c.failure = fmt.Errorf("worker lease expired (%s); assigned load lost", strings.Join(r.lostWorkers, ", "))
+	}
+	return c
+}
 func (m *Manager) runDistributed(ctx context.Context, r *execution) error {
 	defer m.stopAssignments(r)
 	tick := time.NewTicker(250 * time.Millisecond)
@@ -139,45 +196,28 @@ func (m *Manager) runDistributed(ctx context.Context, r *execution) error {
 			m.drain(r)
 			return ctx.Err()
 		case <-tick.C:
-			all := true
-			var failure error
-			var lost, failed []string
-			m.workers.mu.Lock()
-			for _, id := range r.workerIDs {
-				w := m.workers.workers[id]
-				if w == nil || (time.Since(w.LastSeen) > workerLease && !w.report.Done) {
-					// A worker that already finished may go away safely.
-					lost = append(lost, id)
-					continue
-				}
-				if !w.report.Done {
-					all = false
-				}
-				if w.report.Error != "" {
-					failure = errors.New("worker execution failed")
-					failed = append(failed, id)
-				}
-			}
-			if len(lost) > 0 {
-				r.lostWorkers = lost
-				failure = fmt.Errorf("worker lease expired (%s); assigned load lost", strings.Join(lost, ", "))
-			}
-			m.workers.mu.Unlock()
-			if failure != nil {
+			c := m.checkWorkers(r)
+			if len(c.newLost) > 0 || len(c.failed) > 0 {
 				m.mu.Lock()
-				if len(failed) > 0 {
-					m.logEvent(r, "error", "Worker execution failed on %s; stopping the other workers", strings.Join(failed, ", "))
+				if len(c.failed) > 0 {
+					m.logEvent(r, "error", "Worker execution failed on %s; stopping the other workers", strings.Join(c.failed, ", "))
 				}
-				if len(lost) > 0 {
-					m.logEvent(r, "error", "Worker lease expired on %s; its assigned load is lost", strings.Join(lost, ", "))
+				if len(c.newLost) > 0 {
+					if c.overflow {
+						m.logEvent(r, "error", "Worker lease expired on %s; its assigned load is lost", strings.Join(c.newLost, ", "))
+					} else {
+						m.logEvent(r, "warn", "Worker lease expired on %s; its assigned load is lost and the test continues (tolerates %d lost)", strings.Join(c.newLost, ", "), r.test.MaxLostWorkers)
+					}
 				}
 				m.mu.Unlock()
+			}
+			if c.failure != nil {
 				// Automatic replacement is not implemented: stop the survivors
 				// and collect their final counters before failing the run.
 				m.drain(r)
-				return failure
+				return c.failure
 			}
-			if all {
+			if c.all {
 				return nil
 			}
 		}

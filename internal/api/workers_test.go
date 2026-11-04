@@ -265,3 +265,104 @@ func TestRegisterCleansSelfReportedHost(t *testing.T) {
 		t.Fatalf("host not cleaned: %+v", h)
 	}
 }
+
+func lostRun(t *testing.T, maxLost int, ids ...string) (*Manager, *execution) {
+	t.Helper()
+	m, _ := setup(t)
+	r := &execution{workerIDs: ids, test: Test{ID: "test-a1", MaxLostWorkers: maxLost}}
+	for _, id := range ids {
+		register(t, m.workers, id)
+		assign(m.workers, id, "a1")
+	}
+	return m, r
+}
+
+func expire(m *Manager, id string) {
+	m.workers.mu.Lock()
+	m.workers.workers[id].LastSeen = time.Now().Add(-time.Minute)
+	m.workers.mu.Unlock()
+}
+
+func TestLostWorkerFailsRunByDefault(t *testing.T) {
+	m, r := lostRun(t, 0, "a", "b")
+	expire(m, "a")
+	c := m.checkWorkers(r)
+	if c.failure == nil || !c.overflow || len(r.lostWorkers) != 1 || r.lostWorkers[0] != "a" {
+		t.Fatalf("check = %+v lost = %v", c, r.lostWorkers)
+	}
+}
+
+func TestLostWorkerWithinToleranceKeepsRunning(t *testing.T) {
+	m, r := lostRun(t, 1, "a", "b", "c")
+	m.workers.mu.Lock()
+	m.workers.workers["a"].report.Snapshot = metrics.Snapshot{Connected: 50, Published: 700}
+	m.workers.mu.Unlock()
+	expire(m, "a")
+	c := m.checkWorkers(r)
+	if c.failure != nil || c.all || len(c.newLost) != 1 {
+		t.Fatalf("check = %+v", c)
+	}
+	if again := m.checkWorkers(r); len(again.newLost) != 0 || again.failure != nil {
+		t.Fatalf("a lost worker must be reported once: %+v", again)
+	}
+	if s := m.workerSnapshot(r); s.Published != 700 || s.Connected != 0 {
+		t.Fatalf("lost counters not kept or gauges not zeroed: %+v", s)
+	}
+	m.workers.mu.Lock()
+	if !m.workers.workers["a"].assignment.Stop {
+		t.Fatal("lost worker was not told to stop")
+	}
+	for _, id := range []string{"b", "c"} {
+		m.workers.workers[id].report.Done = true
+	}
+	m.workers.mu.Unlock()
+	if c := m.checkWorkers(r); !c.all || c.failure != nil {
+		t.Fatalf("run should finish once survivors are done: %+v", c)
+	}
+}
+
+func TestLostWorkersBeyondToleranceFail(t *testing.T) {
+	m, r := lostRun(t, 1, "a", "b", "c")
+	expire(m, "a")
+	if c := m.checkWorkers(r); c.failure != nil {
+		t.Fatalf("first loss tolerated: %+v", c)
+	}
+	expire(m, "b")
+	c := m.checkWorkers(r)
+	if c.failure == nil || !c.overflow || !strings.Contains(c.failure.Error(), "a, b") {
+		t.Fatalf("second loss must fail naming both: %+v", c)
+	}
+}
+
+func TestLostWorkerReturningStaysLost(t *testing.T) {
+	m, r := lostRun(t, 1, "a", "b")
+	expire(m, "a")
+	m.checkWorkers(r)
+	m.workers.mu.Lock()
+	m.workers.workers["a"].LastSeen = time.Now() // heartbeats resume
+	m.workers.mu.Unlock()
+	if c := m.checkWorkers(r); c.failure != nil || len(c.newLost) != 0 || len(r.lostWorkers) != 1 {
+		t.Fatalf("returning worker re-counted: %+v lost=%v", c, r.lostWorkers)
+	}
+}
+
+func TestMaxLostWorkersValidation(t *testing.T) {
+	m, _ := setup(t)
+	for _, n := range []int{-1, 1, 2} {
+		if _, err := m.StartOnWorkersTolerant("x", []string{"a"}, n); err == nil || !strings.Contains(err.Error(), "maxLostWorkers") {
+			t.Fatalf("maxLost %d err = %v", n, err)
+		}
+	}
+}
+
+func TestRegistryAllowsMoreThan256Workers(t *testing.T) {
+	r := newWorkerRegistry()
+	for i := 0; i < MaxWorkers; i++ {
+		if _, err := r.register(Worker{ID: fmt.Sprintf("w%d", i)}); err != nil {
+			t.Fatalf("worker %d: %v", i, err)
+		}
+	}
+	if _, err := r.register(Worker{ID: "extra"}); err == nil {
+		t.Fatal("registry exceeded MaxWorkers")
+	}
+}

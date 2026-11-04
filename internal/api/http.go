@@ -105,6 +105,8 @@ func Handler(m *Manager, opts Options) http.Handler {
 			Scenario   string   `json:"scenario"`
 			ScenarioID string   `json:"scenarioId"`
 			Workers    []string `json:"workers,omitempty"`
+			// MaxLostWorkers tolerates this many lost workers (default 0).
+			MaxLostWorkers int `json:"maxLostWorkers,omitempty"`
 		}
 		if !input(w, r, &body) {
 			return
@@ -117,7 +119,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 			}
 			body.Scenario = raw
 		}
-		v, err := m.StartOnWorkers(body.Scenario, body.Workers)
+		v, err := m.StartOnWorkersTolerant(body.Scenario, body.Workers, body.MaxLostWorkers)
 		if err != nil {
 			if errors.Is(err, ErrBusy) {
 				writeError(w, 409, "TEST_RUNNING", err.Error())
@@ -250,8 +252,8 @@ func Handler(m *Manager, opts Options) http.Handler {
 		if body.Workers != nil {
 			workers = *body.Workers
 		}
-		if workers < 1 || workers > 256 {
-			writeError(w, 400, "INVALID_REQUEST", "workers must be between 1 and 256")
+		if workers < 1 || workers > MaxWorkers {
+			writeError(w, 400, "INVALID_REQUEST", fmt.Sprintf("workers must be between 1 and %d", MaxWorkers))
 			return
 		}
 		s, err := decodeScenario(body.Scenario)

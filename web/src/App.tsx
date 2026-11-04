@@ -593,7 +593,8 @@ export function Dashboard({
   const latest = running[0] || tests[0];
   const samples = useQuery({
     queryKey: ["metrics", latest?.id],
-    queryFn: () => request<Sample[]>(`/tests/${encodeURIComponent(latest!.id)}/metrics`),
+    queryFn: () =>
+      request<Sample[]>(`/tests/${encodeURIComponent(latest!.id)}/metrics`),
     enabled: !!latest,
     refetchInterval: latest?.status === "running" ? 3000 : false,
   });
@@ -1057,6 +1058,7 @@ export function ScenarioEditor({
   const [message, setMessage] = useState("");
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
   const [workerQuery, setWorkerQuery] = useState("");
+  const [maxLost, setMaxLost] = useState(0);
   const qc = useQueryClient();
   const workers = useQuery({
     queryKey: ["workers"],
@@ -1073,6 +1075,9 @@ export function ScenarioEditor({
         body: JSON.stringify({
           scenario: yaml,
           ...(selectedWorkers.length ? { workers: selectedWorkers } : {}),
+          ...(selectedWorkers.length > 1 && maxLost > 0
+            ? { maxLostWorkers: Math.min(maxLost, selectedWorkers.length - 1) }
+            : {}),
         }),
       }),
     onSuccess: (t) => {
@@ -1257,6 +1262,26 @@ export function ScenarioEditor({
                 query={workerQuery}
                 onQuery={setWorkerQuery}
               />
+            )}
+            {selectedWorkers.length > 1 && (
+              <label>
+                Tolerated lost workers
+                <input
+                  type="number"
+                  min={0}
+                  max={selectedWorkers.length - 1}
+                  value={maxLost}
+                  onChange={(e) =>
+                    setMaxLost(
+                      Math.max(0, Math.floor(Number(e.target.value)) || 0),
+                    )
+                  }
+                />
+                <small className="subdued">
+                  0 fails the test when any worker is lost. Otherwise the test
+                  keeps running with the survivors at reduced load.
+                </small>
+              </label>
             )}
             <small className="subdued">
               {selectedWorkers.length
@@ -1504,18 +1529,21 @@ function TestDetail({ id }: { id: string }) {
   const t = test.data;
   const metrics = useQuery({
     queryKey: ["metrics", id],
-    queryFn: () => request<Sample[]>(`/tests/${encodeURIComponent(id)}/metrics`),
+    queryFn: () =>
+      request<Sample[]>(`/tests/${encodeURIComponent(id)}/metrics`),
     refetchInterval: t?.status === "running" ? 5000 : false,
   });
   const stream = useStream(id, t?.status === "running");
   const brokers = useQuery({
     queryKey: ["brokers", id],
-    queryFn: () => request<FleetSample[]>(`/tests/${encodeURIComponent(id)}/brokers`),
+    queryFn: () =>
+      request<FleetSample[]>(`/tests/${encodeURIComponent(id)}/brokers`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
   const events = useQuery({
     queryKey: ["events", id],
-    queryFn: () => request<LogEvent[]>(`/tests/${encodeURIComponent(id)}/events`),
+    queryFn: () =>
+      request<LogEvent[]>(`/tests/${encodeURIComponent(id)}/events`),
     refetchInterval: t?.status === "running" ? 10000 : false,
   });
   const zone = useTimeZone();
@@ -1523,7 +1551,8 @@ function TestDetail({ id }: { id: string }) {
   const [exportError, setExportError] = useState<unknown>();
   const qc = useQueryClient();
   const stop = useMutation({
-    mutationFn: () => request(`/tests/${encodeURIComponent(id)}/stop`, { method: "POST" }),
+    mutationFn: () =>
+      request(`/tests/${encodeURIComponent(id)}/stop`, { method: "POST" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["test", id] });
       qc.invalidateQueries({ queryKey: ["tests"] });
@@ -1722,7 +1751,7 @@ function TestDetail({ id }: { id: string }) {
           ) : (
             <Empty
               icon={Gauge}
-            title="No thresholds configured"
+              title="No thresholds configured"
               detail="Add thresholds to your scenario to evaluate pass or fail criteria."
             />
           )}
@@ -1902,7 +1931,7 @@ export function BrokerTelemetry() {
       ) : !data?.configured ? (
         <Empty
           icon={Radio}
-            title="EMQX monitoring is not configured"
+          title="EMQX monitoring is not configured"
           detail="Set the server's EMQX management API URL and API credentials to observe broker-side metrics."
         />
       ) : (
@@ -2068,7 +2097,7 @@ export function Brokers() {
           ) : (
             <Empty
               icon={Database}
-            title="No broker profiles"
+              title="No broker profiles"
               detail="Save a connection to select it in the test wizard."
             />
           )}
@@ -2764,10 +2793,7 @@ function Shell() {
           <div className="topbar-actions">
             <TimeZonePicker />
             {user?.method === "oidc" && (
-              <span
-                className="session-user"
-                title={user.email || user.subject}
-              >
+              <span className="session-user" title={user.email || user.subject}>
                 {user.name || user.email || user.subject}
                 <button
                   aria-label="Sign out"

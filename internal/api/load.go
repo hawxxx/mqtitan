@@ -84,6 +84,9 @@ func (m *Manager) UpdateLoad(id string, request LoadRequest) (Test, error) {
 	m.workers.mu.Lock()
 	defer m.workers.mu.Unlock()
 	for _, id := range r.workerIDs {
+		if r.isLost(id) {
+			continue
+		}
 		w := m.workers.workers[id]
 		if w == nil || !w.SupportsLiveControl || time.Since(w.LastSeen) > workerLease || w.assignment == nil || w.assignment.TestID != r.test.ID || w.report.Done {
 			return Test{}, errors.New("assigned workers must be healthy and support live controls; upgrade workers if needed")
@@ -105,6 +108,9 @@ func (m *Manager) UpdateLoad(id string, request LoadRequest) (Test, error) {
 		return Test{}, err
 	}
 	for _, id := range r.workerIDs {
+		if r.isLost(id) {
+			continue
+		}
 		a := m.workers.workers[id].assignment
 		partition := load
 		partition.Clients = max(0, min(a.CapacityClients, load.Clients-a.ClientOffset))
@@ -133,7 +139,7 @@ func (m *Manager) withLoadStatus(r *execution) Test {
 		m.workers.mu.Lock()
 		control.PendingWorkers = nil
 		for _, id := range r.workerIDs {
-			if w := m.workers.workers[id]; w != nil && w.report.ControlRevision < control.Revision {
+			if w := m.workers.workers[id]; w != nil && !r.isLost(id) && w.report.ControlRevision < control.Revision {
 				control.PendingWorkers = append(control.PendingWorkers, id)
 			}
 		}

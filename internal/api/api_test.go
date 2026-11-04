@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -369,7 +370,7 @@ workloads: [{name: idle, type: connection, clients: 60000}]
 	if w := post("3"); w.Code != 200 || strings.Contains(w.Body.String(), "source ports") {
 		t.Fatalf("workers 3: %d %s", w.Code, w.Body.String())
 	}
-	for _, bad := range []string{"0", "257", "-1"} {
+	for _, bad := range []string{"0", strconv.Itoa(MaxWorkers + 1), "-1"} {
 		if w := post(bad); w.Code != 400 {
 			t.Fatalf("workers %s: %d", bad, w.Code)
 		}
