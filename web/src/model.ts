@@ -66,6 +66,8 @@ export interface Test {
   workerIds?: string[] | null;
   lostWorkers?: string[];
   maxLostWorkers?: number;
+  replaceLostWorkers?: boolean;
+  replacedWorkers?: { lost: string; by: string; at: string }[];
   sourceTestId?: string;
   balance?: Balance;
   loadControl?: {
@@ -356,6 +358,10 @@ export function runWarnings(t: Test): string[] {
   if (t.lostWorkers?.length)
     out.push(
       `Lost workers: ${t.lostWorkers.join(", ")}. Their partitions stopped early; results include their last reported counters only.${t.maxLostWorkers ? ` The test tolerated up to ${t.maxLostWorkers} lost workers, so the achieved load was below the requested load.` : ""}`,
+    );
+  if (t.replacedWorkers?.length)
+    out.push(
+      `Replaced workers: ${t.replacedWorkers.map((r) => `${r.lost} → ${r.by}`).join(", ")}. Replacements reconnect fresh, so the partition was below its target until they connected.`,
     );
   if (t.balance?.complete === false)
     out.push("Broker telemetry was incomplete at the peak sample");

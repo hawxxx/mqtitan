@@ -137,9 +137,9 @@ func remoteCommand(command string, args []string) error {
 	defer cancel()
 	return request(ctx, *controller, method, path, nil, os.Stdout)
 }
-func remoteRun(ctx context.Context, controller, raw string, workers []string, maxLost int) error {
+func remoteRun(ctx context.Context, controller, raw string, workers []string, opts api.StartOptions) error {
 	var t api.Test
-	if err := request(ctx, controller, "POST", "/api/v1/tests", map[string]any{"scenario": raw, "workers": workers, "maxLostWorkers": maxLost}, &t); err != nil {
+	if err := request(ctx, controller, "POST", "/api/v1/tests", map[string]any{"scenario": raw, "workers": workers, "maxLostWorkers": opts.MaxLostWorkers, "replaceLostWorkers": opts.ReplaceLostWorkers, "standbyWorkers": opts.StandbyWorkers}, &t); err != nil {
 		return err
 	}
 	fmt.Printf("Test %s\nDashboard: %s\n", t.ID, controller)

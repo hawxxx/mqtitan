@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"github.com/mqtitan/mqtitan/internal/api"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -95,7 +96,7 @@ func TestInterruptDuringPollStopsRemoteTest(t *testing.T) {
 		}
 		cancel()
 	}()
-	err := remoteRun(ctx, srv.URL, "scenario", nil, 0)
+	err := remoteRun(ctx, srv.URL, "scenario", nil, api.StartOptions{})
 	var exit exitError
 	if !errors.As(err, &exit) || exit.code != 130 {
 		t.Fatalf("got %v", err)

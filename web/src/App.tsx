@@ -1059,6 +1059,7 @@ export function ScenarioEditor({
   const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
   const [workerQuery, setWorkerQuery] = useState("");
   const [maxLost, setMaxLost] = useState(0);
+  const [replaceLost, setReplaceLost] = useState(false);
   const qc = useQueryClient();
   const workers = useQuery({
     queryKey: ["workers"],
@@ -1077,6 +1078,9 @@ export function ScenarioEditor({
           ...(selectedWorkers.length ? { workers: selectedWorkers } : {}),
           ...(selectedWorkers.length > 1 && maxLost > 0
             ? { maxLostWorkers: Math.min(maxLost, selectedWorkers.length - 1) }
+            : {}),
+          ...(selectedWorkers.length && replaceLost
+            ? { replaceLostWorkers: true }
             : {}),
         }),
       }),
@@ -1280,6 +1284,20 @@ export function ScenarioEditor({
                 <small className="subdued">
                   0 fails the test when any worker is lost. Otherwise the test
                   keeps running with the survivors at reduced load.
+                </small>
+              </label>
+            )}
+            {selectedWorkers.length > 0 && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={replaceLost}
+                  onChange={(e) => setReplaceLost(e.target.checked)}
+                />
+                Replace lost workers with idle ones
+                <small className="subdued">
+                  A ready worker outside this test takes over the lost partition
+                  and rejoins the current stage with fresh connections.
                 </small>
               </label>
             )}

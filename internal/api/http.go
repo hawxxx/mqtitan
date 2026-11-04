@@ -107,6 +107,10 @@ func Handler(m *Manager, opts Options) http.Handler {
 			Workers    []string `json:"workers,omitempty"`
 			// MaxLostWorkers tolerates this many lost workers (default 0).
 			MaxLostWorkers int `json:"maxLostWorkers,omitempty"`
+			// ReplaceLostWorkers gives a lost worker's partition to an idle
+			// worker, preferring StandbyWorkers when listed.
+			ReplaceLostWorkers bool     `json:"replaceLostWorkers,omitempty"`
+			StandbyWorkers     []string `json:"standbyWorkers,omitempty"`
 		}
 		if !input(w, r, &body) {
 			return
@@ -119,7 +123,7 @@ func Handler(m *Manager, opts Options) http.Handler {
 			}
 			body.Scenario = raw
 		}
-		v, err := m.StartOnWorkersTolerant(body.Scenario, body.Workers, body.MaxLostWorkers)
+		v, err := m.StartOnWorkersWith(body.Scenario, body.Workers, StartOptions{MaxLostWorkers: body.MaxLostWorkers, ReplaceLostWorkers: body.ReplaceLostWorkers, StandbyWorkers: body.StandbyWorkers})
 		if err != nil {
 			if errors.Is(err, ErrBusy) {
 				writeError(w, 409, "TEST_RUNNING", err.Error())

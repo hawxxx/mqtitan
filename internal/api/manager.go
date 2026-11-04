@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"gopkg.in/yaml.v3"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,9 +40,15 @@ type Test struct {
 	LostWorkers []string            `json:"lostWorkers,omitempty"`
 	// MaxLostWorkers is how many workers may lose their lease before the run
 	// fails; the default 0 fails on the first loss.
-	MaxLostWorkers int           `json:"maxLostWorkers,omitempty"`
-	SourceTestID   string        `json:"sourceTestId,omitempty"`
-	Balance        *emqx.Balance `json:"balance,omitempty"`
+	MaxLostWorkers int `json:"maxLostWorkers,omitempty"`
+	// ReplaceLostWorkers hands a lost worker's partition to an idle worker
+	// (one of StandbyWorkers if set); replaced losses do not count toward
+	// MaxLostWorkers.
+	ReplaceLostWorkers bool             `json:"replaceLostWorkers,omitempty"`
+	StandbyWorkers     []string         `json:"standbyWorkers,omitempty"`
+	ReplacedWorkers    []ReplacedWorker `json:"replacedWorkers,omitempty"`
+	SourceTestID       string           `json:"sourceTestId,omitempty"`
+	Balance            *emqx.Balance    `json:"balance,omitempty"`
 }
 type Sample struct {
 	Timestamp   time.Time        `json:"timestamp"`
@@ -72,6 +79,12 @@ type execution struct {
 	// Guarded by the worker registry lock.
 	peakConnected int64
 	lostWorkers   []string
+	replacements  []ReplacedWorker
+	// Immutable after start, so the registry-locked checks can read them
+	// without touching r.test.
+	maxLost     int
+	replaceLost bool
+	standby     []string
 	// Guarded by Manager.mu.
 	brokers    []emqx.FleetSample
 	events     []LogEvent
@@ -165,28 +178,57 @@ func (m *Manager) persist(t Test) error {
 
 func (m *Manager) Start(raw string) (Test, error) { return m.StartOnWorkers(raw, nil) }
 func (m *Manager) StartOnWorkers(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, 0, "", decodeScenario, true)
+	return m.startTest(raw, workerIDs, StartOptions{}, "", decodeScenario, true)
+}
+
+// StartLocalWith starts a local-CLI run on workers with loss options.
+func (m *Manager) StartLocalWith(raw string, workerIDs []string, o StartOptions) (Test, error) {
+	return m.startTest(raw, workerIDs, o, "", decodeLocalScenario, false)
 }
 
 // StartLocalTolerant is StartLocal that tolerates up to maxLost lost workers.
 func (m *Manager) StartLocalTolerant(raw string, workerIDs []string, maxLost int) (Test, error) {
-	return m.startTest(raw, workerIDs, maxLost, "", decodeLocalScenario, false)
+	return m.startTest(raw, workerIDs, StartOptions{MaxLostWorkers: maxLost}, "", decodeLocalScenario, false)
 }
 
 // StartOnWorkersTolerant is StartOnWorkers that keeps the test running while
 // at most maxLost workers lose their lease.
 func (m *Manager) StartOnWorkersTolerant(raw string, workerIDs []string, maxLost int) (Test, error) {
-	return m.startTest(raw, workerIDs, maxLost, "", decodeScenario, true)
+	return m.StartOnWorkersWith(raw, workerIDs, StartOptions{MaxLostWorkers: maxLost})
+}
+
+// StartOptions tunes how a distributed run reacts to lost workers.
+type StartOptions struct {
+	MaxLostWorkers     int
+	ReplaceLostWorkers bool
+	StandbyWorkers     []string
+}
+
+// StartOnWorkersWith starts a distributed run with loss options.
+func (m *Manager) StartOnWorkersWith(raw string, workerIDs []string, o StartOptions) (Test, error) {
+	return m.startTest(raw, workerIDs, o, "", decodeScenario, true)
 }
 
 // StartLocal starts a scenario supplied by the CLI user who owns this
 // in-process controller; unlike API submissions it may use TLS file paths.
 func (m *Manager) StartLocal(raw string, workerIDs []string) (Test, error) {
-	return m.startTest(raw, workerIDs, 0, "", decodeLocalScenario, false)
+	return m.startTest(raw, workerIDs, StartOptions{}, "", decodeLocalScenario, false)
 }
-func (m *Manager) startTest(raw string, workerIDs []string, maxLost int, sourceTestID string, decode func(string) (scenario.Scenario, error), fromAPI bool) (Test, error) {
+func (m *Manager) startTest(raw string, workerIDs []string, o StartOptions, sourceTestID string, decode func(string) (scenario.Scenario, error), fromAPI bool) (Test, error) {
+	maxLost := o.MaxLostWorkers
 	if maxLost < 0 || (maxLost > 0 && maxLost >= len(workerIDs)) {
 		return Test{}, fmt.Errorf("maxLostWorkers must be between 0 and %d (fewer than the workers assigned)", max(len(workerIDs)-1, 0))
+	}
+	if (o.ReplaceLostWorkers || len(o.StandbyWorkers) > 0) && len(workerIDs) == 0 {
+		return Test{}, errors.New("replaceLostWorkers needs distributed workers")
+	}
+	if len(o.StandbyWorkers) > 0 && !o.ReplaceLostWorkers {
+		return Test{}, errors.New("standbyWorkers requires replaceLostWorkers")
+	}
+	for _, id := range o.StandbyWorkers {
+		if !workerID.MatchString(id) || slices.Contains(workerIDs, id) {
+			return Test{}, fmt.Errorf("standby worker %q is invalid or already assigned", id)
+		}
 	}
 	s, err := decode(raw)
 	if err != nil {
@@ -221,9 +263,9 @@ func (m *Manager) startTest(raw string, workerIDs []string, maxLost int, sourceT
 	ctx, cancel := context.WithCancel(m.ctx)
 	ids := make([]string, len(workerIDs))
 	copy(ids, workerIDs)
-	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, MaxLostWorkers: maxLost, SourceTestID: sourceTestID}
+	t := Test{ID: ID(), Name: s.Name, Status: "running", StartedAt: time.Now().UTC(), Scenario: raw, Thresholds: []thresholds.Result{}, LoadControl: initialLoad(s), WorkerIDs: ids, MaxLostWorkers: maxLost, ReplaceLostWorkers: o.ReplaceLostWorkers, StandbyWorkers: slices.Clone(o.StandbyWorkers), SourceTestID: sourceTestID}
 	counters := metrics.New()
-	r := &execution{fromAPI: fromAPI, ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot, stage: -1}
+	r := &execution{fromAPI: fromAPI, ctx: ctx, control: engine.NewControl(s.Clients.Count), test: t, cancel: cancel, counters: counters, subscribers: make(map[chan Event]struct{}), workerIDs: ids, snapshot: counters.Snapshot, stage: -1, maxLost: maxLost, replaceLost: o.ReplaceLostWorkers, standby: slices.Clone(o.StandbyWorkers)}
 	if len(workerIDs) > 0 {
 		if err := m.assign(r, s, workerIDs); err != nil {
 			cancel()

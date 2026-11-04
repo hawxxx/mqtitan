@@ -138,6 +138,7 @@ type workerCheck struct {
 	newLost  []string // workers newly marked lost this pass, tolerated or not
 	failed   []string // workers that reported an execution error
 	overflow bool     // lost workers exceed the tolerance
+	replaced []ReplacedWorker
 }
 
 // isLost reports whether the worker was marked lost. Callers hold the
@@ -147,7 +148,7 @@ func (r *execution) isLost(id string) bool {
 }
 
 // checkWorkers marks workers whose lease expired as lost. Up to
-// r.test.MaxLostWorkers lost workers are tolerated: the run continues with the
+// r.maxLost lost workers are tolerated: the run continues with the
 // survivors and keeps the lost workers' last cumulative counters. A worker
 // that returns after being marked lost is told to stop, so it does not keep
 // generating load the run no longer accounts for as live.
@@ -172,15 +173,23 @@ func (m *Manager) checkWorkers(r *execution) workerCheck {
 			}
 			continue
 		}
-		if !w.report.Done {
-			c.all = false
-		}
 		if w.report.Error != "" {
 			c.failure = errors.New("worker execution failed")
 			c.failed = append(c.failed, id)
 		}
+		if !w.report.Done {
+			c.all = false
+		}
 	}
-	if len(r.lostWorkers) > r.test.MaxLostWorkers {
+	// Replacements join r.workerIDs while the loop above ranges over it, so
+	// they are made afterwards and checked on the next pass.
+	for _, id := range c.newLost {
+		if rep, ok := m.replaceLostLocked(r, id); ok {
+			c.replaced = append(c.replaced, rep)
+			c.all = false
+		}
+	}
+	if len(r.lostWorkers)-len(r.replacements) > r.maxLost {
 		c.overflow = true
 		c.failure = fmt.Errorf("worker lease expired (%s); assigned load lost", strings.Join(r.lostWorkers, ", "))
 	}
@@ -199,21 +208,28 @@ func (m *Manager) runDistributed(ctx context.Context, r *execution) error {
 			c := m.checkWorkers(r)
 			if len(c.newLost) > 0 || len(c.failed) > 0 {
 				m.mu.Lock()
+				for _, rep := range c.replaced {
+					r.test.WorkerIDs = append(r.test.WorkerIDs, rep.By)
+					r.test.ReplacedWorkers = append(r.test.ReplacedWorkers, rep)
+					m.logEvent(r, "warn", "Worker %s took over the partition of lost worker %s", rep.By, rep.Lost)
+				}
 				if len(c.failed) > 0 {
 					m.logEvent(r, "error", "Worker execution failed on %s; stopping the other workers", strings.Join(c.failed, ", "))
 				}
 				if len(c.newLost) > 0 {
-					if c.overflow {
+					if len(c.replaced) == len(c.newLost) {
+						// Every loss was covered by a replacement.
+					} else if c.overflow {
 						m.logEvent(r, "error", "Worker lease expired on %s; its assigned load is lost", strings.Join(c.newLost, ", "))
 					} else {
-						m.logEvent(r, "warn", "Worker lease expired on %s; its assigned load is lost and the test continues (tolerates %d lost)", strings.Join(c.newLost, ", "), r.test.MaxLostWorkers)
+						m.logEvent(r, "warn", "Worker lease expired on %s; its assigned load is lost and the test continues (tolerates %d lost)", strings.Join(c.newLost, ", "), r.maxLost)
 					}
 				}
 				m.mu.Unlock()
 			}
 			if c.failure != nil {
-				// Automatic replacement is not implemented: stop the survivors
-				// and collect their final counters before failing the run.
+				// Stop the survivors and collect their final counters before
+				// failing the run.
 				m.drain(r)
 				return c.failure
 			}
