@@ -14,7 +14,7 @@ When a tolerated lost worker is detected (`checkWorkers`), give its partition to
 - Candidates are registered, ready, unassigned workers. Opt-in with `replaceLostWorkers` (default off), choosing from a pool: explicit `standbyWorkers` list, or any ready worker not in the test.
 - The replacement connects fresh. Per-client MQTT session state is not transferred; reconnecting clients are a visible burst on the broker, so ramp the replacement using the scenario's connect rate rather than `StartAt` immediately.
 - Accounting: the lost worker keeps its final counters as history (existing behaviour). The replacement reports under its own ID, and `workerIds` / `lostWorkers` plus a new `replacedWorkers: [{lost, by, at}]` record show what happened. Merge stays additive because counters are cumulative per worker.
-- `workerSnapshot` iterates `r.workerIDs`; replacements must be appended under the registry lock. Tolerance counts losses, not replacement success.
+- `workerSnapshot` iterates `r.workerIDs`; replacements must be appended under the registry lock. Replaced losses do not count toward the tolerance (implemented this way so replacement works with `maxLostWorkers` 0); unreplaced ones do.
 - Limits: at most one replacement per lost worker, and none after the run is stopping. If no candidate exists, behave as today (tolerate and continue degraded).
 - Kubernetes: a restarted pod registers with a new ID (or the same ID after the lease expired) and becomes a candidate automatically, so no scheduler integration is needed.
 

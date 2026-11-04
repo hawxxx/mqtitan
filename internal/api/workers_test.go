@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mqtitan/mqtitan/internal/engine"
 	"github.com/mqtitan/mqtitan/internal/metrics"
 	"github.com/mqtitan/mqtitan/internal/platform"
+	"github.com/mqtitan/mqtitan/internal/scenario"
 )
 
 func register(t *testing.T, r *workerRegistry, id string) string {
@@ -270,7 +273,7 @@ func TestRegisterCleansSelfReportedHost(t *testing.T) {
 func lostRun(t *testing.T, maxLost int, ids ...string) (*Manager, *execution) {
 	t.Helper()
 	m, _ := setup(t)
-	r := &execution{workerIDs: ids, test: Test{ID: "test-a1", MaxLostWorkers: maxLost}}
+	r := &execution{workerIDs: ids, maxLost: maxLost, test: Test{ID: "test-a1", MaxLostWorkers: maxLost}}
 	for _, id := range ids {
 		register(t, m.workers, id)
 		assign(m.workers, id, "a1")
@@ -424,5 +427,107 @@ func TestRemoveLostWorkersEndpoints(t *testing.T) {
 	register(t, m.workers, "again")
 	if w := do("/api/v1/workers/again"); w.Code != 409 {
 		t.Fatalf("live worker: %d", w.Code)
+	}
+}
+
+const partitionYAML = `apiVersion: mqtitan.io/v1alpha1
+kind: Scenario
+name: p
+broker:
+  url: mqtt://localhost:1883
+  version: "5"
+  connectTimeout: 1s
+  keepAlive: 10s
+  cleanStart: true
+clients: {count: 2, idTemplate: "c-${sequence}"}
+stages:
+  - {duration: 60s, targetClients: 1}
+  - {duration: 60s, targetClients: 2}
+workloads:
+  - {name: w, type: publisher, clients: 2, topic: "t/${clientId}", qos: 1, ratePerClient: 1, payload: {type: static, value: x}}
+`
+
+func replaceRun(t *testing.T, standby []string, ids ...string) (*Manager, *execution) {
+	t.Helper()
+	m, r := lostRun(t, 0, ids...)
+	r.replaceLost = true
+	r.standby = standby
+	m.workers.mu.Lock()
+	for _, id := range ids {
+		a := m.workers.workers[id].assignment
+		a.Scenario = partitionYAML
+		a.StartAt = time.Now().Add(-90 * time.Second) // 30s into stage two
+		a.ClientOffset, a.CapacityClients = 4, 2
+		a.Load = &engine.Load{Clients: 1, RatePerClient: 2, Revision: 3}
+	}
+	m.workers.mu.Unlock()
+	return m, r
+}
+
+// ready registers an idle worker that has heartbeated.
+func ready(t *testing.T, m *Manager, id string) {
+	t.Helper()
+	register(t, m.workers, id)
+	m.workers.mu.Lock()
+	m.workers.workers[id].heartbeated = true
+	m.workers.mu.Unlock()
+}
+
+func TestLostWorkerIsReplacedByIdleWorker(t *testing.T) {
+	m, r := replaceRun(t, nil, "a", "b")
+	ready(t, m, "spare")
+	expire(m, "a")
+	c := m.checkWorkers(r)
+	if c.failure != nil || len(c.replaced) != 1 || c.replaced[0].Lost != "a" || c.replaced[0].By != "spare" {
+		t.Fatalf("check = %+v", c)
+	}
+	m.workers.mu.Lock()
+	defer m.workers.mu.Unlock()
+	a := m.workers.workers["spare"].assignment
+	if a == nil || a.TestID != "test-a1" || a.ClientOffset != 4 || a.CapacityClients != 2 || a.Load == nil || a.Load.Revision != 3 {
+		t.Fatalf("replacement assignment = %+v", a)
+	}
+	if !slices.Contains(r.workerIDs, "spare") {
+		t.Fatalf("workerIDs = %v", r.workerIDs)
+	}
+	// 30s were left of stage two (60s) minus the start delay: only stage two remains.
+	parsed, err := scenario.Parse([]byte(a.Scenario))
+	if err != nil || len(parsed.Stages) != 1 || parsed.Stages[0].TargetClients != 2 || parsed.Stages[0].Duration.Duration > 31*time.Second || parsed.Stages[0].Duration.Duration < 20*time.Second {
+		t.Fatalf("fast-forwarded stages = %+v err=%v", parsed.Stages, err)
+	}
+}
+
+func TestReplacementCoversLossBeyondTolerance(t *testing.T) {
+	m, r := replaceRun(t, nil, "a", "b")
+	ready(t, m, "spare")
+	expire(m, "a")
+	if c := m.checkWorkers(r); c.failure != nil {
+		t.Fatalf("replaced loss must not fail the run with maxLost 0: %+v", c)
+	}
+	expire(m, "b") // no second idle worker
+	if c := m.checkWorkers(r); c.failure == nil || !c.overflow {
+		t.Fatalf("unreplaced loss must fail: %+v", c)
+	}
+}
+
+func TestReplacementHonoursStandbyList(t *testing.T) {
+	m, r := replaceRun(t, []string{"reserve"}, "a", "b")
+	ready(t, m, "other")
+	expire(m, "a")
+	if c := m.checkWorkers(r); c.failure == nil {
+		t.Fatalf("a worker outside the standby list was used: %+v", c)
+	}
+}
+
+func TestNoReplacementWhenOffOrPastLastStage(t *testing.T) {
+	m, r := replaceRun(t, nil, "a", "b")
+	r.replaceLost = false
+	ready(t, m, "spare")
+	expire(m, "a")
+	if c := m.checkWorkers(r); c.failure == nil || len(c.replaced) != 0 {
+		t.Fatalf("replacement off: %+v", c)
+	}
+	if _, err := fastForward(partitionYAML, time.Now().Add(-10*time.Minute), time.Now()); err == nil {
+		t.Fatal("fast-forward past the last stage must fail")
 	}
 }

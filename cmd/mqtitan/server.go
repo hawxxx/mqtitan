@@ -25,6 +25,8 @@ type runOptions struct {
 	Listen, Data, Controller, Workers, Web string
 	AllowRemote                            bool
 	MaxLostWorkers                         int
+	ReplaceLostWorkers                     bool
+	Standby                                string
 }
 
 func runFlags(f *flag.FlagSet) *runOptions {
@@ -34,6 +36,8 @@ func runFlags(f *flag.FlagSet) *runOptions {
 	f.StringVar(&o.Controller, "controller", controllerDefault(""), "remote controller URL (env MQTITAN_CONTROLLER)")
 	f.StringVar(&o.Workers, "workers", "", "comma-separated distributed worker IDs")
 	f.IntVar(&o.MaxLostWorkers, "max-lost-workers", 0, "keep the test running while at most this many workers lose their lease")
+	f.BoolVar(&o.ReplaceLostWorkers, "replace-lost-workers", false, "give a lost worker's partition to an idle worker")
+	f.StringVar(&o.Standby, "standby-workers", "", "comma-separated worker IDs eligible as replacements (default: any idle worker)")
 	f.StringVar(&o.Web, "web", "", "override embedded UI asset directory")
 	return o
 }
@@ -214,14 +218,14 @@ func executeScenario(raw string, o runOptions) error {
 	ctx, cancel := signalContext()
 	defer cancel()
 	if o.Controller != "" {
-		return remoteRun(ctx, o.Controller, raw, ids, o.MaxLostWorkers)
+		return remoteRun(ctx, o.Controller, raw, ids, o.startOptions())
 	}
 	l, err := openServer(o)
 	if err != nil {
 		return err
 	}
 	defer l.Close()
-	test, err := l.manager.StartLocalTolerant(raw, ids, o.MaxLostWorkers)
+	test, err := l.manager.StartLocalWith(raw, ids, o.startOptions())
 	if err != nil {
 		return err
 	}
@@ -323,4 +327,8 @@ func workerToken() string {
 		return v
 	}
 	return os.Getenv("MQTITAN_TOKEN")
+}
+
+func (o runOptions) startOptions() api.StartOptions {
+	return api.StartOptions{MaxLostWorkers: o.MaxLostWorkers, ReplaceLostWorkers: o.ReplaceLostWorkers, StandbyWorkers: splitWorkers(o.Standby)}
 }
