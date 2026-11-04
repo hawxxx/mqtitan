@@ -107,6 +107,15 @@ func remoteCommand(command string, args []string) error {
 		}
 		path = "/api/v1/scenarios/" + url.PathEscape(id)
 		method = "DELETE"
+	case "delete-worker":
+		if id == "" {
+			return errors.New("worker ID required")
+		}
+		path = "/api/v1/workers/" + url.PathEscape(id)
+		method = "DELETE"
+	case "prune-workers":
+		path = "/api/v1/workers?status=lost"
+		method = "DELETE"
 	case "status":
 		if id != "" {
 			path += "/" + url.PathEscape(id)

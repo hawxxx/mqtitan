@@ -2209,6 +2209,14 @@ export function Workers() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(0);
+  const qc = useQueryClient();
+  const pruneLost = useMutation({
+    mutationFn: () =>
+      request<{ removed: string[] }>("/workers?status=lost", {
+        method: "DELETE",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["workers"] }),
+  });
   const all = workers.data || [];
   const filtered = all.filter(
     (w) =>
@@ -2243,7 +2251,16 @@ export function Workers() {
         >
           <RefreshCw size={15} /> Refresh
         </button>
+        {totals.lost > 0 && (
+          <button
+            disabled={pruneLost.isPending}
+            onClick={() => pruneLost.mutate()}
+          >
+            Remove lost workers
+          </button>
+        )}
       </Title>
+      {pruneLost.error && <ErrorNotice error={pruneLost.error} />}
       {workers.error && <ErrorNotice error={workers.error} />}
       {all.length > 0 && (
         <div className="worker-summary" aria-label="Fleet summary">

@@ -142,6 +142,50 @@ func (r *workerRegistry) prune(now time.Time) {
 		}
 	}
 }
+
+var (
+	errWorkerNotFound = errors.New("worker not found")
+	// errWorkerNotRemovable protects workers that are alive or still hold an
+	// assignment for a running test.
+	errWorkerNotRemovable = errors.New("only lost workers without a running assignment can be removed")
+)
+
+func (s *workerState) removable(now time.Time) bool {
+	return s.assignment == nil && now.Sub(s.LastSeen) > workerLease
+}
+
+// remove forgets one lost worker immediately instead of waiting for prune.
+// A removed worker that is in fact alive gets a registration error from its
+// next heartbeat and registers again.
+func (r *workerRegistry) remove(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s := r.workers[id]
+	if s == nil {
+		return errWorkerNotFound
+	}
+	if !s.removable(time.Now().UTC()) {
+		return errWorkerNotRemovable
+	}
+	delete(r.workers, id)
+	return nil
+}
+
+// removeLost forgets every removable lost worker and returns their IDs.
+func (r *workerRegistry) removeLost() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now().UTC()
+	removed := []string{}
+	for id, s := range r.workers {
+		if s.removable(now) {
+			delete(r.workers, id)
+			removed = append(removed, id)
+		}
+	}
+	sort.Strings(removed)
+	return removed
+}
 func (r *workerRegistry) list() []Worker {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -217,6 +261,24 @@ func (r *workerRegistry) heartbeat(h Heartbeat) (HeartbeatResponse, error) {
 }
 func (m *Manager) workerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/workers", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, m.workers.list()) })
+	mux.HandleFunc("DELETE /api/v1/workers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("status") != "lost" {
+			writeError(w, 400, "INVALID_REQUEST", "status=lost is required")
+			return
+		}
+		removed := m.workers.removeLost()
+		writeJSON(w, 200, map[string][]string{"removed": removed})
+	})
+	mux.HandleFunc("DELETE /api/v1/workers/{id}", func(w http.ResponseWriter, r *http.Request) {
+		switch err := m.workers.remove(r.PathValue("id")); {
+		case errors.Is(err, errWorkerNotFound):
+			writeError(w, 404, "NOT_FOUND", err.Error())
+		case err != nil:
+			writeError(w, 409, "WORKER_NOT_REMOVABLE", err.Error())
+		default:
+			w.WriteHeader(204)
+		}
+	})
 	mux.HandleFunc("POST /api/v1/workers/register", func(w http.ResponseWriter, r *http.Request) {
 		var worker Worker
 		if !input(w, r, &worker) {

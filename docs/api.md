@@ -22,6 +22,7 @@ The controller serves `/api/v1`. Success responses use `{ "data": ... }`; errors
 | POST | `/api/v1/plan` | Validate and estimate a scenario |
 | GET | `/api/v1/doctor` | Controller-host diagnostics |
 | GET | `/api/v1/workers` | Registered workers, with self-reported `host` details (OS, CPU, memory and limits) from current workers |
+| DELETE | `/api/v1/workers/{id}`, `/api/v1/workers?status=lost` | Forget one lost worker (404 unknown, 409 if live or holding a running assignment) or every removable lost worker (`{"removed": [...]}`). Idle lost workers are also pruned automatically after ten leases; CLI: `delete-worker ID`, `prune-workers` |
 | POST | `/api/v1/workers/register`, `/api/v1/workers/heartbeat` | Worker-agent protocol |
 | POST / GET | `/api/v1/certificates` | Upload / list profiles |
 | GET | `/api/v1/brokers/emqx` | Optional broker telemetry |
