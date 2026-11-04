@@ -59,7 +59,7 @@ networkPolicy:
           port: 8883
 ```
 
-worker.nodeSelector, worker.affinity and worker.tolerations also accept native Kubernetes configuration, and worker.podAnnotations adds pod annotations. Zone spreading requires nodes carrying zone labels. Place workers near brokers when measuring broker capacity, and deliberately vary zones when measuring network effects.
+worker.nodeSelector, worker.affinity and worker.tolerations also accept native Kubernetes configuration, and worker.podAnnotations adds pod annotations. Zone spreading requires nodes carrying zone labels. A worker whose memory reaches 90% of its container limit (or host memory when no limit is set) aborts its assignment and reports an error, so the test names a clear cause instead of the pod being OOM-killed and showing up as a lost lease. Place workers near brokers when measuring broker capacity, and deliberately vary zones when measuring network effects.
 
 ### Avoiding NAT connection limits
 

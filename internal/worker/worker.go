@@ -154,6 +154,13 @@ func Run(ctx context.Context, opts Options) error {
 			var memory runtime.MemStats
 			runtime.ReadMemStats(&memory)
 			h := api.Heartbeat{ID: opts.ID, MemoryBytes: memory.Sys, ClientTime: time.Now().UTC(), Session: session}
+			if current != nil && !current.finished && current.failure == "" && memoryNearLimit(memory.Sys, host) {
+				// Fail the partition with a clear cause before the kernel kills
+				// the process and the controller only sees a lost lease.
+				slog.Error("worker memory near its limit; aborting the assignment", "worker", opts.ID, "memoryBytes", memory.Sys)
+				current.failure = "worker memory limit reached"
+				current.cancel()
+			}
 			if current != nil {
 				if !current.finished {
 					select {
@@ -251,4 +258,19 @@ func Run(ctx context.Context, opts Options) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+// memoryAbortPercent is the share of the memory limit at which a worker
+// aborts its assignment instead of waiting to be OOM-killed.
+const memoryAbortPercent = 90
+
+// memoryNearLimit reports whether used reaches memoryAbortPercent of the
+// container limit, or of host memory when no limit is set. Unknown limits
+// never abort.
+func memoryNearLimit(used uint64, host platform.Host) bool {
+	limit := host.MemoryLimitBytes
+	if limit == 0 {
+		limit = host.MemoryTotalBytes
+	}
+	return limit > 0 && used >= limit/100*memoryAbortPercent
 }
