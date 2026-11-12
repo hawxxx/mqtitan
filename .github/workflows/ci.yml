@@ -47,7 +47,7 @@ jobs:
         working-directory: web
       - run: npm test
         working-directory: web
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with: {version: v3.17.3}
       - run: helm lint deploy/helm/mqtitan
       - run: helm template test deploy/helm/mqtitan --set worker.replicas=2 --set ingress.enabled=true --set serviceMonitor.enabled=true > "$RUNNER_TEMP/chart.yaml"
